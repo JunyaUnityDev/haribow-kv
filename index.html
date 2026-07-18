@@ -34,7 +34,7 @@ const errShow=m=>{const l=document.getElementById('load');if(l){l.textContent='E
 window.onerror=(m,s,ln)=>errShow(m+' @'+ln);
 addEventListener('unhandledrejection',e=>errShow('REJ '+(e.reason&&e.reason.message||e.reason)));
 
-const CFG = { shiftY: 0.34, bloom:0.9, dust:1500, dur:20.0, revEnd:3.0 };
+const CFG = { shiftY: 0.34, bloom:0.55, dust:1500, dur:20.0, revEnd:3.0 };
 const F=1600, W=1600, Hext=1450, CY=917;
 const dZ = dn => 2.0 + (1.0-dn)*7.0;
 
