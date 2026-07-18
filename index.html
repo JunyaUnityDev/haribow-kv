@@ -34,15 +34,15 @@ const errShow=m=>{const l=document.getElementById('load');if(l){l.textContent='E
 window.onerror=(m,s,ln)=>errShow(m+' @'+ln);
 addEventListener('unhandledrejection',e=>errShow('REJ '+(e.reason&&e.reason.message||e.reason)));
 
-const CFG = { shiftY: 0.34, bloom:0.55, dust:1500, dur:20.0, revEnd:3.0 };
-const F=1600, W=1600, Hext=1450, CY=917;
+const CFG = { shiftY: 0.0, bloom:0.55, dust:1500, dur:20.0, revEnd:3.0 };
+const F=1600, W=2400, Hext=1834, CY=917;   // 背景を左右+下に拡張(主点=中央)
 const dZ = dn => 2.0 + (1.0-dn)*7.0;
 
 const renderer = new THREE.WebGLRenderer({canvas:document.getElementById('c'), antialias:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
 renderer.setSize(innerWidth, innerHeight);
 const scene = new THREE.Scene(); scene.background = new THREE.Color(0x000000);
-const camera = new THREE.PerspectiveCamera(48.75, innerWidth/innerHeight, 0.05, 60);
+const camera = new THREE.PerspectiveCamera(59.66, innerWidth/innerHeight, 0.05, 60);  // 拡張フレーム全体=引き
 camera.position.set(0,0,-8.5);
 function applyShift(){ camera.updateProjectionMatrix(); camera.projectionMatrix.elements[9]=CFG.shiftY; }
 
@@ -72,20 +72,22 @@ async function main(){
   g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
   g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2)); g.setIndex(idx);
   const bgTex=await load('assets/bg.jpg');
-  scene.add(new THREE.Mesh(g, new THREE.MeshBasicMaterial({map:bgTex,side:THREE.DoubleSide})));
+  const bgMesh=new THREE.Mesh(g, new THREE.MeshBasicMaterial({map:bgTex,side:THREE.DoubleSide}));
+  bgMesh.renderOrder=-1; scene.add(bgMesh);
+
+  // ---- logo (深度テスト無効=背景に貫通されない / renderOrder=0でメンバーより先→メンバーが隠す) ----
+  const L=meta.logo, lt=await load('assets/logo.png');
+  const lmat=new THREE.MeshBasicMaterial({map:lt,transparent:true,opacity:0,side:THREE.FrontSide,depthTest:false,depthWrite:false});
+  const logo=new THREE.Mesh(new THREE.PlaneGeometry(L.wl,L.wl*L.asp),lmat);
+  logo.position.set(L.x,L.y,-L.z); logo.renderOrder=0; scene.add(logo);
 
   // ---- members ----
   for(const m of meta.members){
     const t=await load(m.file);
     const mat=new THREE.MeshBasicMaterial({map:t,transparent:true,alphaTest:0.35,side:THREE.FrontSide,depthWrite:true});
     const mesh=new THREE.Mesh(new THREE.PlaneGeometry(m.Wc,m.Hc),mat);
-    mesh.position.set(m.Xc, m.Yc+(m.dy||0), -m.Zm+0.25); scene.add(mesh);
+    mesh.position.set(m.Xc, m.Yc+(m.dy||0), -m.Zm+0.25); mesh.renderOrder=1; scene.add(mesh);
   }
-  // ---- logo ----
-  const L=meta.logo, lt=await load('assets/logo.png');
-  const lmat=new THREE.MeshBasicMaterial({map:lt,transparent:true,opacity:0,side:THREE.FrontSide});
-  const logo=new THREE.Mesh(new THREE.PlaneGeometry(L.wl,L.wl*L.asp),lmat);
-  logo.position.set(L.x,L.y,-L.z); scene.add(logo);
 
   // ---- dust ----
   const N=CFG.dust, dp=new Float32Array(N*3), dph=new Float32Array(N);
