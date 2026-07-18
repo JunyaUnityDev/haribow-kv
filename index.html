@@ -126,8 +126,10 @@ async function main(){
   function frame(){
     const raw = FREEZE!=null?parseFloat(FREEZE):(started?clock.getElapsedTime():0);
     const el=raw%CFG.dur, t2=el;
-    // camera reveal
-    let z; if(t2<=CFG.revEnd) z=-8.5+8.5*eout(t2/CFG.revEnd); else z=-0.45*eout((t2-CFG.revEnd)/(CFG.dur-CFG.revEnd));
+    // camera reveal (ヒーロー位置=アスペクトで自動フィット: 縦画面ほど引いて全員入れる)
+    const asp=innerWidth/innerHeight;
+    const hz=Math.min(6.5, Math.max(-2.5, 5.4/Math.max(0.4,asp) - 6.5));
+    let z; if(t2<=CFG.revEnd) z=-8.5+(hz+8.5)*eout(t2/CFG.revEnd); else z=hz-0.4*eout((t2-CFG.revEnd)/(CFG.dur-CFG.revEnd));
     ptx+=(tx-ptx)*0.06; pty+=(ty-pty)*0.06;
     camera.position.set(ptx*0.35, -pty*0.22, z); applyShift();
     // logo appear @7s
