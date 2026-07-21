@@ -96,7 +96,7 @@ async function main(){
   const L=meta.logo, lt=await load('assets/logo.png');
   const lmat=new THREE.MeshBasicMaterial({map:lt,transparent:true,opacity:0,side:THREE.FrontSide,depthTest:false,depthWrite:false});
   const logo=new THREE.Mesh(new THREE.PlaneGeometry(L.wl,L.wl*L.asp),lmat);
-  logo.position.set(L.x,L.y,-L.z); logo.renderOrder=0; scene.add(logo);
+  logo.position.set(L.x,L.y,-L.z); logo.renderOrder=3; scene.add(logo);   // 常に最前面(下げてもメンバーに隠れない)
 
   // ---- 接地シャドウ用ソフト楕円テクスチャ ----
   const scv=document.createElement('canvas'); scv.width=scv.height=128;
