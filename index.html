@@ -57,6 +57,20 @@ async function main(){
   const meta = await (await fetch('assets/scene.json')).json();
   W=meta.W; Hext=meta.Hext; CY=meta.CY; F=meta.F||1600;   // 実写フレームに更新
   camera.fov=2*Math.atan((Hext/2)/F)*180/Math.PI; camera.updateProjectionMatrix();
+  // ---- FX パラメータ(エディタで操作/scene.jsonに保存) ----
+  meta.fx=Object.assign({
+    smokeAmount:0.55, smokeSpeed:0.012, smokeCount:8,          // 煙: 量 / 横流速(±) / 枚数
+    particleCount:2500, particleSize:0.013, particleHalo:0.6,  // 粒子: 量 / 細かさ(大きさ) / ハロー(発光)
+    logoHalo:0.28,                                             // ロゴのハロー
+    memberFeather:0.05, memberCutout:0.40, memberHalo:0.20     // メンバー: ふちぼかし / 切り取り / ハロー
+  }, meta.fx||{});
+  const FX=meta.fx;
+  // ソフト円形テクスチャ(粒子/ハロー用: 中心白→縁透明)
+  const glcv=document.createElement('canvas'); glcv.width=glcv.height=64;
+  { const gx=glcv.getContext('2d'); const g=gx.createRadialGradient(32,32,0,32,32,32);
+    g.addColorStop(0,'rgba(255,255,255,1)'); g.addColorStop(0.4,'rgba(255,255,255,0.5)'); g.addColorStop(1,'rgba(255,255,255,0)');
+    gx.fillStyle=g; gx.fillRect(0,0,64,64); }
+  const glowTex=new THREE.CanvasTexture(glcv);
   // ---- depth mesh ----
   const dimg = await loadImg('assets/depth.png');
   const dcv=document.createElement('canvas'); dcv.width=dimg.width; dcv.height=dimg.height;
@@ -90,13 +104,38 @@ async function main(){
   const bgMesh=new THREE.Mesh(g, new THREE.MeshBasicMaterial({map:bgTex,side:THREE.DoubleSide}));
   bgMesh.renderOrder=-2; scene.add(bgMesh);
 
-  // (旧・偽装床は削除。実写背景メッシュが本物の床を持つ)
+  // ---- 地を這う煙(ヘイズ): 足元に低く溜め横へ直線ドリフト。奥→手前に配置し前後の厚みを出す ----
+  const smokeTex=await load('assets/smokeB.png');
+  const smokeGroup=new THREE.Group(); scene.add(smokeGroup);
+  let smokePlanes=[];
+  function buildSmoke(n){
+    smokePlanes.forEach(s=>{s.mesh.geometry.dispose();s.mat.dispose();smokeGroup.remove(s.mesh);});
+    smokePlanes=[];
+    n=Math.max(1,Math.round(n));
+    for(let i=0;i<n;i++){
+      const f=n>1?i/(n-1):0;                       // 0=手前, 1=奥
+      const z=-(2.8+f*5.7);                         // 手前(-2.8)→奥(-8.5)
+      const w=(-z)*1.5, h=w*0.46;
+      const front=z>-6.0;                           // 手前=メンバーの前を薄く veil / 奥=後ろ
+      const mat=new THREE.MeshBasicMaterial({map:smokeTex,transparent:true,opacity:0,depthWrite:false,depthTest:!front,side:THREE.DoubleSide});
+      const mesh=new THREE.Mesh(new THREE.PlaneGeometry(w,h),mat);
+      const baseY=-0.62-(1-f)*0.40;                 // 手前ほどやや低く床際に
+      const rnd=(Math.sin(i*12.9898)*43758.5453); const x0=((rnd-Math.floor(rnd))*2-1);
+      mesh.position.set(x0*w*0.4, baseY, z); mesh.renderOrder=front?2:-1;
+      smokeGroup.add(mesh);
+      smokePlanes.push({mesh,mat,baseY,z,w,x:x0*w*0.4,drift:(Math.sin(i*7.13)*0.4+0.8),front});
+    }
+  }
+  buildSmoke(FX.smokeCount);
 
   // ---- logo (深度テスト無効=背景に貫通されない / renderOrder=0でメンバーより先→メンバーが隠す) ----
   const L=meta.logo, lt=await load('assets/logo.png');
   const lmat=new THREE.MeshBasicMaterial({map:lt,transparent:true,opacity:0,side:THREE.FrontSide,depthTest:false,depthWrite:false});
   const logo=new THREE.Mesh(new THREE.PlaneGeometry(L.wl,L.wl*L.asp),lmat);
   logo.position.set(L.x,L.y,-L.z); logo.renderOrder=0; scene.add(logo);   // メンバーの後ろ(最前面にしない)
+  // ロゴのハロー(後ろに広がる発光)
+  const lhMat=new THREE.MeshBasicMaterial({map:glowTex,transparent:true,opacity:0,depthTest:false,depthWrite:false,blending:THREE.AdditiveBlending,color:0x9fd4ff});
+  const logoHalo=new THREE.Mesh(new THREE.PlaneGeometry(1,1),lhMat); logoHalo.renderOrder=-0.5; scene.add(logoHalo);
 
   // ---- 接地シャドウ用ソフト楕円テクスチャ ----
   const scv=document.createElement('canvas'); scv.width=scv.height=128;
@@ -107,11 +146,17 @@ async function main(){
   const shTex=new THREE.CanvasTexture(scv);
 
   // ---- members (整合配置=Hで拡大背景に合わせた3D座標に直接配置) ----
+  // ふちぼかし(feather)+切り取り(cutout)をシェーダで制御。halo=白リム発光
+  const MEM_VERT='varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}';
+  const MEM_FRAG='uniform sampler2D map;uniform float cutout,feather,opacity;varying vec2 vUv;void main(){vec4 t=texture2D(map,vUv);float a=smoothstep(cutout-feather,cutout+feather,t.a);if(a<0.004)discard;gl_FragColor=vec4(t.rgb,a*opacity);}';
+  const HALO_FRAG='uniform sampler2D map;uniform float cutout,feather,opacity;varying vec2 vUv;void main(){vec4 t=texture2D(map,vUv);float a=smoothstep(cutout-feather*5.0,cutout+feather*5.0,t.a);gl_FragColor=vec4(1.0,1.0,1.0,a*opacity);}';
   const memObjs=[];
   const applyMember=o=>{
     const m=o.m, footY=m.Yc-m.Hc/2+(m.dy||0)+(m.padFrac||0)*m.Hc;  // 実際の靴接地ライン
     o.mesh.geometry.dispose(); o.mesh.geometry=new THREE.PlaneGeometry(m.Wc,m.Hc);
     o.mesh.position.set(m.Xc, m.Yc+(m.dy||0), -m.Zm);
+    o.halo.geometry.dispose(); o.halo.geometry=new THREE.PlaneGeometry(m.Wc*1.05,m.Hc*1.05);
+    o.halo.position.copy(o.mesh.position);
     o.sh.geometry.dispose(); o.sh.geometry=new THREE.PlaneGeometry(m.Wc*0.95, m.Wc*1.05);
     o.sh.position.set(m.Xc, footY+0.015, -m.Zm+m.Wc*0.42);
   };
@@ -120,18 +165,25 @@ async function main(){
     // 接地シャドウ(床に寝かせ手前に伸ばす=足手前の視差ギャップ帯を埋め浮きを消す)
     const smat=new THREE.MeshBasicMaterial({map:shTex,transparent:true,opacity:0.6,depthTest:true,depthWrite:false,side:THREE.DoubleSide});
     const sh=new THREE.Mesh(new THREE.PlaneGeometry(1,1), smat); sh.rotation.x=-Math.PI/2; sh.renderOrder=0.5; scene.add(sh);
-    const mat=new THREE.MeshBasicMaterial({map:t,transparent:true,alphaTest:0.35,side:THREE.FrontSide,depthWrite:true});
+    // リムハロー(メンバーの少し外側に白発光→メンバー本体が上に描かれ縁だけ光る)
+    const hmat=new THREE.ShaderMaterial({uniforms:{map:{value:t},cutout:{value:FX.memberCutout},feather:{value:FX.memberFeather},opacity:{value:FX.memberHalo}},vertexShader:MEM_VERT,fragmentShader:HALO_FRAG,transparent:true,depthWrite:false,depthTest:true,blending:THREE.AdditiveBlending});
+    const halo=new THREE.Mesh(new THREE.PlaneGeometry(1,1),hmat); halo.renderOrder=0.9; scene.add(halo);
+    const mat=new THREE.ShaderMaterial({uniforms:{map:{value:t},cutout:{value:FX.memberCutout},feather:{value:FX.memberFeather},opacity:{value:1}},vertexShader:MEM_VERT,fragmentShader:MEM_FRAG,transparent:true,depthWrite:false,depthTest:true});
     const mesh=new THREE.Mesh(new THREE.PlaneGeometry(1,1),mat); mesh.renderOrder=1; scene.add(mesh);
-    const o={m,mesh,sh}; memObjs.push(o); applyMember(o);
+    const o={m,mesh,sh,halo,mat,hmat}; memObjs.push(o); applyMember(o);
   }
 
-  // ---- dust ----
-  const N=CFG.dust, dp=new Float32Array(N*3), dph=new Float32Array(N);
-  for(let i=0;i<N;i++){const z=-(2.2+Math.random()*6.4);dp[i*3]=(Math.random()*2-1)*(-z)*0.55;dp[i*3+1]=-2+Math.random()*4.2;dp[i*3+2]=z;dph[i]=Math.random()*6.28;}
-  const dg2=new THREE.BufferGeometry(); dg2.setAttribute('position',new THREE.BufferAttribute(dp,3));
-  const dmat=new THREE.PointsMaterial({color:0xfff4e0,size:0.011,sizeAttenuation:true,transparent:true,opacity:0.55,blending:THREE.AdditiveBlending,depthWrite:false});
-  const dust=new THREE.Points(dg2,dmat); scene.add(dust);
-  const dbase=dp.slice();
+  // ---- dust (粒子: 量/細かさ/ハローをFXで制御・奥から手前まで3D配置) ----
+  let dust,dg2,dp,dph,dbase,N;
+  function buildDust(count){
+    if(dust){dg2.dispose();dust.material.dispose();scene.remove(dust);}
+    N=Math.max(1,Math.round(count)); dp=new Float32Array(N*3); dph=new Float32Array(N);
+    for(let i=0;i<N;i++){const z=-(2.0+Math.random()*6.8);dp[i*3]=(Math.random()*2-1)*(-z)*0.6;dp[i*3+1]=-2+Math.random()*4.4;dp[i*3+2]=z;dph[i]=Math.random()*6.28;}
+    dg2=new THREE.BufferGeometry(); dg2.setAttribute('position',new THREE.BufferAttribute(dp,3));
+    const dmat=new THREE.PointsMaterial({map:glowTex,color:0xfff4e0,size:FX.particleSize,sizeAttenuation:true,transparent:true,opacity:FX.particleHalo,blending:THREE.AdditiveBlending,depthWrite:false});
+    dust=new THREE.Points(dg2,dmat); scene.add(dust); dbase=dp.slice();
+  }
+  buildDust(FX.particleCount);
 
   // ---- bloom ----
   const composer=new EffectComposer(renderer);
@@ -173,7 +225,20 @@ async function main(){
     if(meta.logoScale==null)meta.logoScale=1; if(meta.logoYoff==null)meta.logoYoff=0; if(meta.logoX==null)meta.logoX=0;
     const NAMES={m0:'まきと',m1:'りゅーすけ',m2:'潤弥',m3:'だいすけ',m4:'周平',m5:'まほろ',m6:'海野',m7:'ケンタ'};
     let sel=memObjs.length-1;   // 既定=ケンタ(前列)
-    let target='member';        // member | camera | logo
+    let target='member';        // member | camera | logo | fx
+    const FXP=[
+      {k:'smokeAmount',label:'煙の量',step:0.03,min:0,max:2},
+      {k:'smokeSpeed',label:'煙の横流れ',step:0.004,min:-0.1,max:0.1},
+      {k:'smokeCount',label:'煙の枚数',step:1,min:1,max:24,int:1,rebuild:'smoke'},
+      {k:'particleCount',label:'粒子の量',step:200,min:0,max:8000,int:1,rebuild:'dust'},
+      {k:'particleSize',label:'粒子の細かさ',step:0.002,min:0.002,max:0.06},
+      {k:'particleHalo',label:'粒子のハロー',step:0.05,min:0,max:1.5},
+      {k:'logoHalo',label:'ロゴのハロー',step:0.04,min:0,max:2},
+      {k:'memberFeather',label:'ふちぼかし',step:0.006,min:0,max:0.3},
+      {k:'memberCutout',label:'切り取り',step:0.02,min:0.05,max:0.9},
+      {k:'memberHalo',label:'メンバーのハロー',step:0.03,min:0,max:2}
+    ];
+    let fxi=0;
     const ASPS=[['Fill',null],['16:9',16/9],['16:10',16/10],['21:9',21/9],['4:3',4/3],['iPhone',390/844]];
     const _ap=new URLSearchParams(location.search).get('asp');   // ?asp=1.778 等で初期アスペクト指定(検証用)
     forceAspect=(_ap!=null&&_ap!=='')?(+_ap):390/844;           // 既定=iPhone(今の値がiPhone用)
@@ -202,23 +267,31 @@ async function main(){
         body='<div style="color:#7cf;margin:4px 0">カメラ最終位置</div>'
           +'引き(fit): '+meta.fit.toFixed(3)+' / 上下(camY): '+meta.camY.toFixed(3)
           +'<div style="margin-top:5px;color:#bbb;font-size:11px">+/−=引き(大=引く/小=寄る)<br>↑↓=上下</div>';
-      } else {
+      } else if(target==='logo'){
         body='<div style="color:#7cf;margin:4px 0">ロゴ</div>'
           +'大きさ: '+meta.logoScale.toFixed(3)+' / 上下: '+meta.logoYoff.toFixed(3)+' / 左右: '+meta.logoX.toFixed(3)
           +'<div style="margin-top:5px;color:#bbb;font-size:11px">+/−=大きさ ↑↓=上下 ←→=左右</div>';
+      } else {
+        body='<div style="margin:4px 0;display:flex;flex-wrap:wrap;gap:3px">'
+          +FXP.map((p,i)=>btn(p.label,i===fxi,'data-fx="'+i+'"')).join('')+'</div>'
+          +'選択: <span style="color:#7cf">'+FXP[fxi].label+'</span> = '+(+FX[FXP[fxi].k]).toFixed(FXP[fxi].int?0:3)
+          +'<div style="margin-top:5px;color:#bbb;font-size:11px">↑↓=値 ←→=項目切替 / Shift=粗</div>';
       }
       panel.innerHTML='<b>配置モード</b>'
-        +'<div style="margin:5px 0;display:flex;gap:3px">'+btn('メンバー',target==='member','data-t="member"')+btn('カメラ',target==='camera','data-t="camera"')+btn('ロゴ',target==='logo','data-t="logo"')+'</div>'
+        +'<div style="margin:5px 0;display:flex;gap:3px;flex-wrap:wrap">'+btn('メンバー',target==='member','data-t="member"')+btn('カメラ',target==='camera','data-t="camera"')+btn('ロゴ',target==='logo','data-t="logo"')+btn('エフェクト',target==='fx','data-t="fx"')+'</div>'
         +'<div style="margin:5px 0;display:flex;flex-wrap:wrap;gap:3px">アスペクト: '+ASPS.map(a=>btn(a[0]+(vmap[vkey(a[1])]?'●':''),forceAspect===a[1],'data-a="'+(a[1]==null?'':a[1])+'"')).join('')+'</div>'
         +body
         +'<div style="margin-top:6px;font-size:11px">Shift=大きく動く / ●=設定済 <b style="color:#fe7">E=Export</b></div>';
       panel.querySelectorAll('[data-mi]').forEach(b=>b.onclick=()=>{sel=+b.dataset.mi;draw();});
+      panel.querySelectorAll('[data-fx]').forEach(b=>b.onclick=()=>{fxi=+b.dataset.fx;draw();});
       panel.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{target=b.dataset.t;draw();});
       panel.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{saveCur();forceAspect=b.dataset.a===''?null:+b.dataset.a;curAsp=forceAspect;loadAsp(curAsp);if(window.__applyViewport)window.__applyViewport();draw();});
     };
     const exportJSON=()=>{
       saveCur();
+      const fxo={}; FXP.forEach(p=>fxo[p.k]=p.int?Math.round(FX[p.k]):+(+FX[p.k]).toFixed(4));
       const out={
+        fx:fxo,
         views:Object.values(vmap).map(v=>({aspect:v.aspect==null?null:+(+v.aspect).toFixed(4),fit:+v.fit.toFixed(4),camY:+v.camY.toFixed(4),logoScale:+v.logoScale.toFixed(4),logoYoff:+v.logoYoff.toFixed(4),logoX:+v.logoX.toFixed(4)})),
         members:meta.members.map(m=>({file:m.file,Xc:+m.Xc.toFixed(4),Yc:+m.Yc.toFixed(4),Zm:+m.Zm.toFixed(3),Wc:+m.Wc.toFixed(4),Hc:+m.Hc.toFixed(4),dy:+((m.dy||0)).toFixed(4),padFrac:m.padFrac||0}))
       };
@@ -244,12 +317,21 @@ async function main(){
         else if(e.key==='+'||e.key==='=')meta.fit=Math.max(0.2,meta.fit-fs);   // 寄る
         else if(e.key==='-'||e.key==='_')meta.fit=Math.min(2.5,meta.fit+fs);   // 引く
         else hit=false;
-      } else {
+      } else if(target==='logo'){
         const s=e.shiftKey?0.04:0.008;
         if(e.key==='ArrowUp')meta.logoYoff+=s; else if(e.key==='ArrowDown')meta.logoYoff-=s;
         else if(e.key==='ArrowLeft')meta.logoX-=s; else if(e.key==='ArrowRight')meta.logoX+=s;
         else if(e.key==='+'||e.key==='=')meta.logoScale*=1.02; else if(e.key==='-'||e.key==='_')meta.logoScale/=1.02;
         else hit=false;
+      } else {   // fx
+        if(e.key==='ArrowLeft'){fxi=(fxi+FXP.length-1)%FXP.length;}
+        else if(e.key==='ArrowRight'){fxi=(fxi+1)%FXP.length;}
+        else if(e.key==='ArrowUp'||e.key==='ArrowDown'){
+          const p=FXP[fxi], st=p.step*(e.shiftKey?4:1)*(e.key==='ArrowUp'?1:-1);
+          let v=(+FX[p.k])+st; v=Math.max(p.min,Math.min(p.max,v)); if(p.int)v=Math.round(v);
+          FX[p.k]=v;
+          if(p.rebuild==='smoke')buildSmoke(FX.smokeCount); else if(p.rebuild==='dust')buildDust(FX.particleCount);
+        } else hit=false;
       }
       if(hit){e.preventDefault();draw();}
     });
@@ -293,14 +375,30 @@ async function main(){
     camera.position.set(G.gcx+wx+ptx*0.3, G.gcy+CF.camY-pty*0.2, z);
     camera.rotation.set(0,0,0);              // 真っ直ぐ(lookAt無し)
     applyShift();
+    const la=Math.min(1,Math.max(0,(t2-7.0)/0.6));   // logo appear @7s
     // ロゴをフレーム内上部へ自動配置+contain(幅と高さ両方に収める=全アスペクトで適正)
     { const Zl=L.z, dl=z+Zl, vH=vt*dl, vW=vt*Math.max(0.34,asp)*dl;
       const lw=Math.min(vW*0.82, vH*0.62/L.asp)*CF.logoScale, lsc=lw/L.wl; logo.scale.set(lsc,lsc,1);
       const lH=L.wl*L.asp*lsc;
-      logo.position.set(G.gcx+CF.logoX*vW, (G.gcy+CF.camY)+vH-lH/2-vH*0.05+CF.logoYoff*vH, -Zl); }
+      logo.position.set(G.gcx+CF.logoX*vW, (G.gcy+CF.camY)+vH-lH/2-vH*0.05+CF.logoYoff*vH, -Zl);
+      // ロゴのハロー(ロゴ位置に追従・後ろに広がる)
+      logoHalo.position.set(logo.position.x, logo.position.y, logo.position.z-0.01);
+      logoHalo.scale.set(L.wl*lsc*1.6, L.wl*L.asp*lsc*2.0, 1); lhMat.opacity=FX.logoHalo*la; }
     afterimage.uniforms['damp'].value = t2<CFG.revEnd ? 0.5 : 0.18;
-    // logo appear @7s
-    const la=Math.min(1,Math.max(0,(t2-7.0)/0.6)); lmat.opacity=la;
+    lmat.opacity=la;
+    // ---- FX ライブ反映 ----
+    for(const s of smokePlanes){                        // 煙: 横直線ドリフト + 端フェード(継ぎ目なし)
+      const R=s.w*0.6; s.x+=FX.smokeSpeed*s.drift;
+      if(s.x>R)s.x-=2*R; else if(s.x<-R)s.x+=2*R;
+      s.mesh.position.x=s.x;
+      const e=Math.min(1,Math.max(0,(Math.abs(s.x)-R*0.55)/(R*0.45)));
+      s.mat.opacity=FX.smokeAmount*(1-e*e)*(s.front?0.5:1.0);
+    }
+    for(const o of memObjs){                             // メンバー: ふちぼかし/切り取り/ハロー
+      o.mat.uniforms.cutout.value=FX.memberCutout; o.mat.uniforms.feather.value=FX.memberFeather;
+      o.hmat.uniforms.cutout.value=FX.memberCutout; o.hmat.uniforms.feather.value=FX.memberFeather; o.hmat.uniforms.opacity.value=FX.memberHalo;
+    }
+    dust.material.size=FX.particleSize; dust.material.opacity=FX.particleHalo;   // 粒子: 細かさ/ハロー
     // dust drift
     const tt=clock.getElapsedTime();
     for(let i=0;i<N;i++){dp[i*3]=dbase[i*3]+Math.sin(dph[i]+tt*0.5)*0.06;dp[i*3+1]=dbase[i*3+1]+Math.cos(dph[i]*1.3+tt*0.4)*0.05;}

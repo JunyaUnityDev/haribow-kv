@@ -154,5 +154,17 @@
    "logoYoff": -0.104,
    "logoX": 0
   }
- ]
+ ],
+ "fx": {
+  "smokeAmount": 0.55,
+  "smokeSpeed": 0.012,
+  "smokeCount": 8,
+  "particleCount": 2500,
+  "particleSize": 0.013,
+  "particleHalo": 0.6,
+  "logoHalo": 0.28,
+  "memberFeather": 0.05,
+  "memberCutout": 0.4,
+  "memberHalo": 0.2
+ }
 }
