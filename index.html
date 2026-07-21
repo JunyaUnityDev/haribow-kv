@@ -60,8 +60,19 @@ async function main(){
   const dimg = await loadImg('assets/depth.png');
   const dcv=document.createElement('canvas'); dcv.width=dimg.width; dcv.height=dimg.height;
   const dctx=dcv.getContext('2d'); dctx.drawImage(dimg,0,0);
-  const dd=dctx.getImageData(0,0,dimg.width,dimg.height).data; const dW=dimg.width,dH=dimg.height;
-  const sample=(u,v)=>{const x=Math.min(dW-1,Math.floor(u*(dW-1))),y=Math.min(dH-1,Math.floor(v*(dH-1)));return dd[(y*dW+x)*4]/255;};
+  const raw=dctx.getImageData(0,0,dimg.width,dimg.height).data; const dW=dimg.width,dH=dimg.height;
+  // 深度をグレースケール化→ボックスブラーで階段(バンディング)を除去し床の波打ちを消す
+  let df=new Float32Array(dW*dH); for(let i=0;i<dW*dH;i++) df[i]=raw[i*4]/255;
+  const blur=(src,r)=>{const out=new Float32Array(dW*dH),tmp=new Float32Array(dW*dH);
+    for(let y=0;y<dH;y++)for(let x=0;x<dW;x++){let s=0,n=0;for(let k=-r;k<=r;k++){const xx=x+k;if(xx>=0&&xx<dW){s+=src[y*dW+xx];n++;}}tmp[y*dW+x]=s/n;}
+    for(let y=0;y<dH;y++)for(let x=0;x<dW;x++){let s=0,n=0;for(let k=-r;k<=r;k++){const yy=y+k;if(yy>=0&&yy<dH){s+=tmp[yy*dW+x];n++;}}out[y*dW+x]=s/n;}
+    return out;};
+  df=blur(df,3);
+  // バイリニア抽出でグリッド解像度に依存した段差も消す
+  const sample=(u,v)=>{const fx=u*(dW-1),fy=v*(dH-1);const x0=Math.min(dW-1,Math.floor(fx)),y0=Math.min(dH-1,Math.floor(fy));
+    const x1=Math.min(dW-1,x0+1),y1=Math.min(dH-1,y0+1),tx=fx-x0,ty=fy-y0;
+    const a=df[y0*dW+x0],b=df[y0*dW+x1],c=df[y1*dW+x0],d=df[y1*dW+x1];
+    return (a*(1-tx)+b*tx)*(1-ty)+(c*(1-tx)+d*tx)*ty;};
   const GX=220,GY=200, OVER=0.06;
   const pos=[],uv=[],idx=[];
   for(let iy=0;iy<GY;iy++)for(let ix=0;ix<GX;ix++){
@@ -86,13 +97,31 @@ async function main(){
   const logo=new THREE.Mesh(new THREE.PlaneGeometry(L.wl,L.wl*L.asp),lmat);
   logo.position.set(L.x,L.y,-L.z); logo.renderOrder=0; scene.add(logo);
 
+  // ---- 接地シャドウ用ソフト楕円テクスチャ ----
+  const scv=document.createElement('canvas'); scv.width=scv.height=128;
+  { const sx=scv.getContext('2d');
+    const gr=sx.createRadialGradient(64,64,2,64,64,62);
+    gr.addColorStop(0,'rgba(0,0,0,0.62)'); gr.addColorStop(0.55,'rgba(0,0,0,0.32)'); gr.addColorStop(1,'rgba(0,0,0,0)');
+    sx.fillStyle=gr; sx.fillRect(0,0,128,128); }
+  const shTex=new THREE.CanvasTexture(scv);
+
   // ---- members (整合配置=Hで拡大背景に合わせた3D座標に直接配置) ----
+  const memObjs=[];
+  const applyMember=o=>{
+    const m=o.m, footY=m.Yc-m.Hc/2+(m.dy||0)+(m.padFrac||0)*m.Hc;  // 実際の靴接地ライン
+    o.mesh.geometry.dispose(); o.mesh.geometry=new THREE.PlaneGeometry(m.Wc,m.Hc);
+    o.mesh.position.set(m.Xc, m.Yc+(m.dy||0), -m.Zm);
+    o.sh.geometry.dispose(); o.sh.geometry=new THREE.PlaneGeometry(m.Wc*0.95, m.Wc*1.05);
+    o.sh.position.set(m.Xc, footY+0.015, -m.Zm+m.Wc*0.42);
+  };
   for(const m of meta.members){
     const t=await load(m.file);
+    // 接地シャドウ(床に寝かせ手前に伸ばす=足手前の視差ギャップ帯を埋め浮きを消す)
+    const smat=new THREE.MeshBasicMaterial({map:shTex,transparent:true,opacity:0.6,depthTest:true,depthWrite:false,side:THREE.DoubleSide});
+    const sh=new THREE.Mesh(new THREE.PlaneGeometry(1,1), smat); sh.rotation.x=-Math.PI/2; sh.renderOrder=0.5; scene.add(sh);
     const mat=new THREE.MeshBasicMaterial({map:t,transparent:true,alphaTest:0.35,side:THREE.FrontSide,depthWrite:true});
-    const mesh=new THREE.Mesh(new THREE.PlaneGeometry(m.Wc, m.Hc),mat);
-    mesh.position.set(m.Xc, m.Yc+(m.dy||0), -m.Zm);
-    mesh.renderOrder=1; scene.add(mesh);
+    const mesh=new THREE.Mesh(new THREE.PlaneGeometry(1,1),mat); mesh.renderOrder=1; scene.add(mesh);
+    const o={m,mesh,sh}; memObjs.push(o); applyMember(o);
   }
 
   // ---- dust ----
@@ -113,7 +142,7 @@ async function main(){
   applyShift();
   document.getElementById('load').style.opacity=0;
   const enterEl=document.getElementById('enter');
-  const DBG=new URLSearchParams(location.search).get('t')!=null;
+  const DBG=new URLSearchParams(location.search).get('t')!=null||new URLSearchParams(location.search).has('edit');
   if(DBG){document.getElementById('load').style.display='none';started=true;}
   setTimeout(()=>{document.getElementById('load').style.display='none';if(!DBG)enterEl.style.display='flex';},900);
   enterEl.addEventListener('pointerdown',async()=>{
@@ -127,15 +156,59 @@ async function main(){
 
   // ---- interaction (gyro/touch parallax) ----
   let tx=0,ty=0,ptx=0,pty=0;
-  addEventListener('deviceorientation',e=>{if(e.gamma!=null){tx=Math.max(-1,Math.min(1,e.gamma/30));ty=Math.max(-1,Math.min(1,(e.beta-40)/30));}});
-  addEventListener('pointermove',e=>{tx=(e.clientX/innerWidth*2-1);ty=(e.clientY/innerHeight*2-1);});
+  const EDITMODE=new URLSearchParams(location.search).has('edit');
+  addEventListener('deviceorientation',e=>{if(EDITMODE)return;if(e.gamma!=null){tx=Math.max(-1,Math.min(1,e.gamma/30));ty=Math.max(-1,Math.min(1,(e.beta-40)/30));}});
+  addEventListener('pointermove',e=>{if(EDITMODE)return;tx=(e.clientX/innerWidth*2-1);ty=(e.clientY/innerHeight*2-1);});
 
   const eout=x=>{x=Math.min(1,Math.max(0,x));return 1-(1-x)**3;};
   const sstep=x=>{x=Math.min(1,Math.max(0,x));return x*x*x*(x*(x*6-15)+10);};   // ease-in-out(滑らか)
   const FREEZE=new URLSearchParams(location.search).get('t');   // ?t=秒 で固定(検証用)
+  const EDIT=new URLSearchParams(location.search).has('edit');  // ?edit で手動配置モード
+
+  // ================= 手動配置モード =================
+  if(EDIT){
+    started=true;
+    const NAMES={m0:'まきと',m1:'りゅーすけ',m2:'潤弥',m3:'だいすけ',m4:'周平',m5:'まほろ',m6:'海野',m7:'ケンタ'};
+    let sel=memObjs.length-1;   // 既定=ケンタ(前列)
+    const key=o=>o.m.file.split('/').pop().replace('.png','');
+    const panel=document.createElement('div');
+    panel.style.cssText='position:fixed;top:8px;left:8px;z-index:9999;background:rgba(0,0,0,.82);color:#fff;font:12px/1.5 -apple-system,sans-serif;padding:10px 12px;border-radius:8px;max-width:240px;user-select:none';
+    document.body.appendChild(panel);
+    const draw=()=>{
+      const o=memObjs[sel], m=o.m;
+      panel.innerHTML='<b>配置モード</b> — 選択: <span style="color:#7cf">'+NAMES[key(o)]+'('+key(o)+')</span>'
+        +'<div style="margin:6px 0;display:flex;flex-wrap:wrap;gap:3px">'
+        +memObjs.map((oo,i)=>'<button data-i="'+i+'" style="padding:2px 5px;border:0;border-radius:4px;cursor:pointer;background:'+(i===sel?'#3a7':'#444')+';color:#fff">'+NAMES[key(oo)]+'</button>').join('')
+        +'</div>'
+        +'dy(上下): '+(m.dy||0).toFixed(4)+' / X(左右): '+m.Xc.toFixed(3)+' / 大きさ: '+m.Wc.toFixed(3)
+        +'<div style="margin-top:6px;color:#bbb;font-size:11px">↑↓=上下  ←→=左右  +/-=大きさ<br>Shift=大きく動く  0〜7=選択切替<br><b style="color:#fe7">E=Exportして書き出し</b></div>';
+      panel.querySelectorAll('button').forEach(b=>b.onclick=()=>{sel=+b.dataset.i;draw();});
+    };
+    const exportJSON=()=>{
+      const out=meta.members.map(m=>({file:m.file,Xc:+m.Xc.toFixed(4),Yc:+m.Yc.toFixed(4),Zm:+m.Zm.toFixed(3),Wc:+m.Wc.toFixed(4),Hc:+m.Hc.toFixed(4),dy:+((m.dy||0)).toFixed(4),padFrac:m.padFrac||0}));
+      const blob=new Blob([JSON.stringify(out,null,2)],{type:'application/json'});
+      const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='members_edited.json'; a.click();
+      console.log(JSON.stringify(out));
+    };
+    addEventListener('keydown',e=>{
+      if(e.key>='0'&&e.key<='7'){const i=+e.key;if(i<memObjs.length){sel=i;draw();}return;}
+      if(e.key==='e'||e.key==='E'){exportJSON();return;}
+      const o=memObjs[sel], m=o.m, s=e.shiftKey?0.02:0.004; let hit=true;
+      if(e.key==='ArrowUp')m.dy=(m.dy||0)+s;
+      else if(e.key==='ArrowDown')m.dy=(m.dy||0)-s;
+      else if(e.key==='ArrowLeft')m.Xc-=s;
+      else if(e.key==='ArrowRight')m.Xc+=s;
+      else if(e.key==='+'||e.key==='='){m.Wc*=1.015;m.Hc*=1.015;}
+      else if(e.key==='-'||e.key==='_'){m.Wc/=1.015;m.Hc/=1.015;}
+      else hit=false;
+      if(hit){e.preventDefault();applyMember(o);draw();}
+    });
+    draw();
+  }
+
   function frame(){
     const raw = FREEZE!=null?parseFloat(FREEZE):(started?clock.getElapsedTime():0);
-    const el=raw%CFG.dur, t2=el;
+    const el=EDIT?CFG.dur:(raw%CFG.dur), t2=el;
     // camera reveal (ヒーロー位置=アスペクトで自動フィット: 縦画面ほど引いて全員入れる)
     // グループを必ず余白付きで収めるフィットカメラ(どのアスペクトでも見切れ無し)
     const asp=innerWidth/innerHeight;
