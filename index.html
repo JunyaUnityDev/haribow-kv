@@ -153,6 +153,11 @@ async function main(){
     camera.position.set(G.gcx+wx+ptx*0.3, G.gcy+(meta.camY||0.15)-pty*0.2, z);
     camera.rotation.set(0,0,0);              // 真っ直ぐ(lookAt無し)
     applyShift();
+    // ロゴをフレーム内上部へ自動配置+contain(幅と高さ両方に収める=全アスペクトで適正)
+    { const Zl=L.z, dl=z+Zl, vH=vt*dl, vW=vt*Math.max(0.34,asp)*dl;
+      const lw=Math.min(vW*0.82, vH*0.62/L.asp), lsc=lw/L.wl; logo.scale.set(lsc,lsc,1);
+      const lH=L.wl*L.asp*lsc;
+      logo.position.set(G.gcx, (G.gcy+(meta.camY||0.15))+vH-lH/2-vH*0.05, -Zl); }
     afterimage.uniforms['damp'].value = t2<CFG.revEnd ? 0.5 : 0.18;
     // logo appear @7s
     const la=Math.min(1,Math.max(0,(t2-7.0)/0.6)); lmat.opacity=la;
