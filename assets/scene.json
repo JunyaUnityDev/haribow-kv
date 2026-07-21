@@ -7,12 +7,12 @@
  "members": [
   {
    "file": "assets/members/m0.png",
-   "Xc": 0.5342,
+   "Xc": 0.5622,
    "Yc": -0.0226,
    "Zm": 8.85,
    "Wc": 0.5807,
    "Hc": 0.8481,
-   "dy": 0.081,
+   "dy": 0.101,
    "padFrac": 0.0993
   },
   {
@@ -112,6 +112,38 @@
    "camY": 0.31,
    "logoScale": 1.1041,
    "logoYoff": -0.488,
+   "logoX": 0
+  },
+  {
+   "aspect": null,
+   "fit": 1.37,
+   "camY": 0.31,
+   "logoScale": 1.1041,
+   "logoYoff": -0.088,
+   "logoX": 0
+  },
+  {
+   "aspect": 1.7778,
+   "fit": 1.22,
+   "camY": 0.31,
+   "logoScale": 1.1951,
+   "logoYoff": -0.024,
+   "logoX": 0
+  },
+  {
+   "aspect": 1.6,
+   "fit": 1.22,
+   "camY": 0.31,
+   "logoScale": 1.1951,
+   "logoYoff": -0.024,
+   "logoX": 0
+  },
+  {
+   "aspect": 2.3333,
+   "fit": 1.22,
+   "camY": 0.31,
+   "logoScale": 1.1951,
+   "logoYoff": -0.024,
    "logoX": 0
   }
  ]

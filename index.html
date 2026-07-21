@@ -175,14 +175,15 @@ async function main(){
     let sel=memObjs.length-1;   // 既定=ケンタ(前列)
     let target='member';        // member | camera | logo
     const ASPS=[['Fill',null],['16:9',16/9],['16:10',16/10],['21:9',21/9],['4:3',4/3],['iPhone',390/844]];
-    forceAspect=390/844;        // 既定=iPhone(今の値がiPhone用)
+    const _ap=new URLSearchParams(location.search).get('asp');   // ?asp=1.778 等で初期アスペクト指定(検証用)
+    forceAspect=(_ap!=null&&_ap!=='')?(+_ap):390/844;           // 既定=iPhone(今の値がiPhone用)
     // アスペクト別設定の作業マップ(切替で保存/読込・Exportで全view書き出し)
     let curAsp=forceAspect;
     const vkey=a=>a==null?'fill':(+a).toFixed(3);
     const vmap={}; (meta.views||[]).forEach(v=>{vmap[vkey(v.aspect)]=Object.assign({},v);});
     const saveCur=()=>{vmap[vkey(curAsp)]={aspect:curAsp,fit:meta.fit,camY:meta.camY,logoScale:meta.logoScale,logoYoff:meta.logoYoff,logoX:meta.logoX};};
     const loadAsp=a=>{const v=vmap[vkey(a)]; if(v){meta.fit=v.fit;meta.camY=v.camY;meta.logoScale=v.logoScale;meta.logoYoff=v.logoYoff;meta.logoX=v.logoX;}};
-    saveCur();   // 現在値をiPhone枠として記録
+    loadAsp(curAsp); saveCur();   // 初期アスペクトのビュー値を読み込んでから記録
     const key=o=>o.m.file.split('/').pop().replace('.png','');
     const panel=document.createElement('div');
     panel.style.cssText='position:fixed;top:8px;left:8px;z-index:9999;background:rgba(0,0,0,.84);color:#fff;font:12px/1.55 -apple-system,sans-serif;padding:10px 12px;border-radius:8px;max-width:270px;user-select:none';
@@ -255,15 +256,20 @@ async function main(){
     draw();
   }
 
-  // アスペクト別設定の選択。編集中はmeta生値(スライダー直結)、公開時はviewsから最も近いアスペクトを採用
+  // アスペクト別設定の選択。編集中はmeta生値(スライダー直結)、公開時はviewsをアスペクトで線形補間
+  //  → タップした比率ちょうどではその値と完全一致(WYSIWYG)、中間は滑らかに繋ぐ(カクつき/飛び無し)
   const baseCF=()=>({fit:(meta.fit!=null?meta.fit:0.86),camY:(meta.camY!=null?meta.camY:0.15),logoScale:(meta.logoScale||1),logoYoff:(meta.logoYoff||0),logoX:(meta.logoX||0)});
+  const _pick=(v,b)=>({fit:v.fit??b.fit,camY:v.camY??b.camY,logoScale:v.logoScale??b.logoScale,logoYoff:v.logoYoff??b.logoYoff,logoX:v.logoX??b.logoX});
+  const _lerp=(a,c,t)=>({fit:a.fit+(c.fit-a.fit)*t,camY:a.camY+(c.camY-a.camY)*t,logoScale:a.logoScale+(c.logoScale-a.logoScale)*t,logoYoff:a.logoYoff+(c.logoYoff-a.logoYoff)*t,logoX:a.logoX+(c.logoX-a.logoX)*t});
   function pickView(asp){
     const b=baseCF();
-    if(EDIT || !meta.views || !meta.views.length) return b;
-    let best=null,bd=1e9;
-    for(const v of meta.views){const d=Math.abs(Math.log((v.aspect||1)/asp)); if(d<bd){bd=d;best=v;}}
-    if(!best) return b;
-    return {fit:best.fit??b.fit,camY:best.camY??b.camY,logoScale:best.logoScale??b.logoScale,logoYoff:best.logoYoff??b.logoYoff,logoX:best.logoX??b.logoX};
+    if(EDIT) return b;
+    const vs=(meta.views||[]).filter(v=>v.aspect!=null).sort((x,y)=>x.aspect-y.aspect).map(v=>({aspect:v.aspect,..._pick(v,b)}));
+    if(!vs.length) return b;
+    if(asp<=vs[0].aspect) return vs[0];
+    if(asp>=vs[vs.length-1].aspect) return vs[vs.length-1];
+    for(let i=0;i<vs.length-1;i++){ if(asp>=vs[i].aspect && asp<=vs[i+1].aspect){ const t=(asp-vs[i].aspect)/(vs[i+1].aspect-vs[i].aspect); return _lerp(vs[i],vs[i+1],t); } }
+    return vs[0];
   }
   function frame(){
     const raw = FREEZE!=null?parseFloat(FREEZE):(started?clock.getElapsedTime():0);
