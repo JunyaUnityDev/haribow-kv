@@ -31,6 +31,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { AfterimagePass } from 'three/addons/postprocessing/AfterimagePass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 const errShow=m=>{const l=document.getElementById('load');if(l){l.textContent='ERR: '+m;l.style.opacity=1;l.style.display='flex';}};
 window.onerror=(m,s,ln)=>errShow(m+' @'+ln);
 addEventListener('unhandledrejection',e=>errShow('REJ '+(e.reason&&e.reason.message||e.reason)));
@@ -60,9 +61,12 @@ async function main(){
   // ---- FX パラメータ(エディタで操作/scene.jsonに保存) ----
   meta.fx=Object.assign({
     smokeAmount:0.55, smokeSpeed:0.012, smokeCount:8,          // 煙: 量 / 横流速(±) / 枚数
+    smokeHeight:-0.55, smokeSpread:0.30,                       // 煙: 高さ(Y基準) / 高さのばらけ(手前↔奥)
     particleCount:2500, particleSize:0.013, particleHalo:0.6,  // 粒子: 量 / 細かさ(大きさ) / ハロー(発光)
     logoHalo:0.28,                                             // ロゴのハロー
-    memberFeather:0.05, memberCutout:0.40, memberHalo:0.20     // メンバー: ふちぼかし / 切り取り / ハロー
+    memberFeather:0.05, memberCutout:0.40, memberHalo:0.35,    // メンバー: ふちぼかし / 切り取り / ハロー(発光)
+    shadowDarkness:0.34, shadowBlur:0.5, shadowLength:1.1,     // 落ち影: 濃さ / ぼかし / 長さ(カメラ側へ)
+    vignette:0.34, grade:0.28, sideLight:0.30                  // シネマ: ビネット / グレード(寒→暖) / サイド光
   }, meta.fx||{});
   const FX=meta.fx;
   // ソフト円形テクスチャ(粒子/ハロー用: 中心白→縁透明)
@@ -115,15 +119,15 @@ async function main(){
     for(let i=0;i<n;i++){
       const f=n>1?i/(n-1):0;                       // 0=手前, 1=奥
       const z=-(2.8+f*5.7);                         // 手前(-2.8)→奥(-8.5)
-      const w=(-z)*1.5, h=w*0.46;
+      const w=(-z)*1.5, h=w*0.42;
       const front=z>-6.0;                           // 手前=メンバーの前を薄く veil / 奥=後ろ
-      const mat=new THREE.MeshBasicMaterial({map:smokeTex,transparent:true,opacity:0,depthWrite:false,depthTest:!front,side:THREE.DoubleSide});
+      // depthTest false=床メッシュに埋もれない(renderOrderで前後を制御)。高さは frame() で FX から反映
+      const mat=new THREE.MeshBasicMaterial({map:smokeTex,transparent:true,opacity:0,depthWrite:false,depthTest:false,side:THREE.DoubleSide});
       const mesh=new THREE.Mesh(new THREE.PlaneGeometry(w,h),mat);
-      const baseY=-0.62-(1-f)*0.40;                 // 手前ほどやや低く床際に
       const rnd=(Math.sin(i*12.9898)*43758.5453); const x0=((rnd-Math.floor(rnd))*2-1);
-      mesh.position.set(x0*w*0.4, baseY, z); mesh.renderOrder=front?2:-1;
+      mesh.position.set(x0*w*0.4, FX.smokeHeight, z); mesh.renderOrder=front?2:-1;
       smokeGroup.add(mesh);
-      smokePlanes.push({mesh,mat,baseY,z,w,x:x0*w*0.4,drift:(Math.sin(i*7.13)*0.4+0.8),front});
+      smokePlanes.push({mesh,mat,f,z,w,x:x0*w*0.4,drift:(Math.sin(i*7.13)*0.4+0.8),front});
     }
   }
   buildSmoke(FX.smokeCount);
@@ -149,14 +153,19 @@ async function main(){
   // ふちぼかし(feather)+切り取り(cutout)をシェーダで制御。halo=白リム発光
   const MEM_VERT='varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}';
   const MEM_FRAG='uniform sampler2D map;uniform float cutout,feather,opacity;varying vec2 vUv;void main(){vec4 t=texture2D(map,vUv);float a=smoothstep(cutout-feather,cutout+feather,t.a);if(a<0.004)discard;gl_FragColor=vec4(t.rgb,a*opacity);}';
-  const HALO_FRAG='uniform sampler2D map;uniform float cutout,feather,opacity;varying vec2 vUv;void main(){vec4 t=texture2D(map,vUv);float a=smoothstep(cutout-feather*5.0,cutout+feather*5.0,t.a);gl_FragColor=vec4(1.0,1.0,1.0,a*opacity);}';
+  // ハロー: 外側に太くにじむ白光→Bloomが拾って発光に見える
+  const HALO_FRAG='uniform sampler2D map;uniform float cutout,feather,opacity;varying vec2 vUv;void main(){vec4 t=texture2D(map,vUv);float a=smoothstep(cutout-feather*6.0,cutout+feather*6.0,t.a);gl_FragColor=vec4(vec3(1.6,1.5,1.25),a*opacity);}';
+  // 落ち影: 黒シルエットをブラー(複数サンプル)して床に落とす
+  const SHADOW_FRAG='uniform sampler2D map;uniform float cutout,darkness,blur;varying vec2 vUv;void main(){float a=0.0;for(int j=-2;j<=2;j++){float o=float(j)*blur*0.02;a+=step(cutout,texture2D(map,vUv+vec2(o,0.0)).a);a+=step(cutout,texture2D(map,vUv+vec2(0.0,o)).a);}a/=10.0;gl_FragColor=vec4(0.0,0.0,0.0,a*darkness);}';
   const memObjs=[];
   const applyMember=o=>{
     const m=o.m, footY=m.Yc-m.Hc/2+(m.dy||0)+(m.padFrac||0)*m.Hc;  // 実際の靴接地ライン
+    o.footY=footY;
     o.mesh.geometry.dispose(); o.mesh.geometry=new THREE.PlaneGeometry(m.Wc,m.Hc);
     o.mesh.position.set(m.Xc, m.Yc+(m.dy||0), -m.Zm);
-    o.halo.geometry.dispose(); o.halo.geometry=new THREE.PlaneGeometry(m.Wc*1.05,m.Hc*1.05);
+    o.halo.geometry.dispose(); o.halo.geometry=new THREE.PlaneGeometry(m.Wc*1.1,m.Hc*1.1);
     o.halo.position.copy(o.mesh.position);
+    o.shp.geometry.dispose(); o.shp.geometry=new THREE.PlaneGeometry(m.Wc, m.Hc);   // 落ち影(足元→カメラ側へ寝かせる)
     o.sh.geometry.dispose(); o.sh.geometry=new THREE.PlaneGeometry(m.Wc*0.95, m.Wc*1.05);
     o.sh.position.set(m.Xc, footY+0.015, -m.Zm+m.Wc*0.42);
   };
@@ -165,12 +174,15 @@ async function main(){
     // 接地シャドウ(床に寝かせ手前に伸ばす=足手前の視差ギャップ帯を埋め浮きを消す)
     const smat=new THREE.MeshBasicMaterial({map:shTex,transparent:true,opacity:0.6,depthTest:true,depthWrite:false,side:THREE.DoubleSide});
     const sh=new THREE.Mesh(new THREE.PlaneGeometry(1,1), smat); sh.rotation.x=-Math.PI/2; sh.renderOrder=0.5; scene.add(sh);
-    // リムハロー(メンバーの少し外側に白発光→メンバー本体が上に描かれ縁だけ光る)
+    // 擬似落ち影(シルエットを床に寝かせカメラ側へ伸ばす)
+    const spmat=new THREE.ShaderMaterial({uniforms:{map:{value:t},cutout:{value:FX.memberCutout},darkness:{value:FX.shadowDarkness},blur:{value:FX.shadowBlur}},vertexShader:MEM_VERT,fragmentShader:SHADOW_FRAG,transparent:true,depthWrite:false,depthTest:false,side:THREE.DoubleSide});
+    const shp=new THREE.Mesh(new THREE.PlaneGeometry(1,1),spmat); shp.rotation.x=Math.PI/2; shp.renderOrder=0.3; scene.add(shp);
+    // リムハロー(メンバーの外側ににじむ光→本体が上に描かれ縁だけ発光)
     const hmat=new THREE.ShaderMaterial({uniforms:{map:{value:t},cutout:{value:FX.memberCutout},feather:{value:FX.memberFeather},opacity:{value:FX.memberHalo}},vertexShader:MEM_VERT,fragmentShader:HALO_FRAG,transparent:true,depthWrite:false,depthTest:true,blending:THREE.AdditiveBlending});
     const halo=new THREE.Mesh(new THREE.PlaneGeometry(1,1),hmat); halo.renderOrder=0.9; scene.add(halo);
     const mat=new THREE.ShaderMaterial({uniforms:{map:{value:t},cutout:{value:FX.memberCutout},feather:{value:FX.memberFeather},opacity:{value:1}},vertexShader:MEM_VERT,fragmentShader:MEM_FRAG,transparent:true,depthWrite:false,depthTest:true});
     const mesh=new THREE.Mesh(new THREE.PlaneGeometry(1,1),mat); mesh.renderOrder=1; scene.add(mesh);
-    const o={m,mesh,sh,halo,mat,hmat}; memObjs.push(o); applyMember(o);
+    const o={m,mesh,sh,halo,mat,hmat,shp,spmat}; memObjs.push(o); applyMember(o);
   }
 
   // ---- dust (粒子: 量/細かさ/ハローをFXで制御・奥から手前まで3D配置) ----
@@ -191,6 +203,18 @@ async function main(){
   const afterimage=new AfterimagePass(0.7); composer.addPass(afterimage);   // モーションブラー(動く時だけ)
   const bloom=new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),CFG.bloom,0.7,0.75);
   composer.addPass(bloom);
+  // ---- シネマ仕上げ(ビネット + グレード寒→暖 + サイド光) 一括ポストパス ----
+  const gradePass=new ShaderPass({uniforms:{tDiffuse:{value:null},vignette:{value:FX.vignette},grade:{value:FX.grade},sideLight:{value:FX.sideLight}},
+    vertexShader:'varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
+    fragmentShader:'uniform sampler2D tDiffuse;uniform float vignette,grade,sideLight;varying vec2 vUv;'
+      +'void main(){vec4 c=texture2D(tDiffuse,vUv);vec3 col=c.rgb;'
+      +'float lum=dot(col,vec3(0.299,0.587,0.114));'
+      +'vec3 warm=vec3(1.07,1.01,0.90),cool=vec3(0.93,0.99,1.12);'
+      +'vec3 g=col*mix(cool,warm,lum); col=mix(col,g,grade);'          // 暗部寒色/明部暖色
+      +'float sl=smoothstep(1.0,0.0,vUv.x); col+=sl*sideLight*0.28*lum;'  // 左からのサイド光
+      +'vec2 d=vUv-0.5; float v=1.0-dot(d,d)*vignette*2.4; col*=clamp(v,0.0,1.0);'  // ビネット
+      +'gl_FragColor=vec4(col,c.a);}'});
+  composer.addPass(gradePass);
 
   applyShift();
   document.getElementById('load').style.opacity=0;
@@ -230,13 +254,21 @@ async function main(){
       {k:'smokeAmount',label:'煙の量',step:0.03,min:0,max:2},
       {k:'smokeSpeed',label:'煙の横流れ',step:0.004,min:-0.1,max:0.1},
       {k:'smokeCount',label:'煙の枚数',step:1,min:1,max:24,int:1,rebuild:'smoke'},
+      {k:'smokeHeight',label:'煙の高さ',step:0.04,min:-2.5,max:1.5},
+      {k:'smokeSpread',label:'煙の高さ差',step:0.04,min:0,max:2},
       {k:'particleCount',label:'粒子の量',step:200,min:0,max:8000,int:1,rebuild:'dust'},
       {k:'particleSize',label:'粒子の細かさ',step:0.002,min:0.002,max:0.06},
       {k:'particleHalo',label:'粒子のハロー',step:0.05,min:0,max:1.5},
       {k:'logoHalo',label:'ロゴのハロー',step:0.04,min:0,max:2},
       {k:'memberFeather',label:'ふちぼかし',step:0.006,min:0,max:0.3},
       {k:'memberCutout',label:'切り取り',step:0.02,min:0.05,max:0.9},
-      {k:'memberHalo',label:'メンバーのハロー',step:0.03,min:0,max:2}
+      {k:'memberHalo',label:'メンバーのハロー',step:0.03,min:0,max:2},
+      {k:'shadowDarkness',label:'落ち影の濃さ',step:0.03,min:0,max:1},
+      {k:'shadowBlur',label:'落ち影のぼかし',step:0.06,min:0,max:3},
+      {k:'shadowLength',label:'落ち影の長さ',step:0.06,min:0.1,max:3},
+      {k:'vignette',label:'ビネット',step:0.03,min:0,max:1.5},
+      {k:'grade',label:'グレード寒暖',step:0.03,min:0,max:1.5},
+      {k:'sideLight',label:'サイド光',step:0.03,min:0,max:1.5}
     ];
     let fxi=0;
     const ASPS=[['Fill',null],['16:9',16/9],['16:10',16/10],['21:9',21/9],['4:3',4/3],['iPhone',390/844]];
@@ -387,18 +419,23 @@ async function main(){
     afterimage.uniforms['damp'].value = t2<CFG.revEnd ? 0.5 : 0.18;
     lmat.opacity=la;
     // ---- FX ライブ反映 ----
-    for(const s of smokePlanes){                        // 煙: 横直線ドリフト + 端フェード(継ぎ目なし)
+    for(const s of smokePlanes){                        // 煙: 横直線ドリフト + 端フェード(継ぎ目なし) + 高さ
       const R=s.w*0.6; s.x+=FX.smokeSpeed*s.drift;
       if(s.x>R)s.x-=2*R; else if(s.x<-R)s.x+=2*R;
       s.mesh.position.x=s.x;
+      s.mesh.position.y=FX.smokeHeight+(0.5-s.f)*FX.smokeSpread;   // 手前↔奥の高低差
       const e=Math.min(1,Math.max(0,(Math.abs(s.x)-R*0.55)/(R*0.45)));
       s.mat.opacity=FX.smokeAmount*(1-e*e)*(s.front?0.5:1.0);
     }
+    const sl=FX.shadowLength;
     for(const o of memObjs){                             // メンバー: ふちぼかし/切り取り/ハロー
       o.mat.uniforms.cutout.value=FX.memberCutout; o.mat.uniforms.feather.value=FX.memberFeather;
       o.hmat.uniforms.cutout.value=FX.memberCutout; o.hmat.uniforms.feather.value=FX.memberFeather; o.hmat.uniforms.opacity.value=FX.memberHalo;
+      o.spmat.uniforms.cutout.value=FX.memberCutout; o.spmat.uniforms.darkness.value=FX.shadowDarkness; o.spmat.uniforms.blur.value=FX.shadowBlur;
+      o.shp.scale.set(1,sl,1); o.shp.position.set(o.m.Xc, o.footY, -o.m.Zm+o.m.Hc*sl/2);   // 足元→カメラ側へ伸ばす
     }
     dust.material.size=FX.particleSize; dust.material.opacity=FX.particleHalo;   // 粒子: 細かさ/ハロー
+    gradePass.uniforms.vignette.value=FX.vignette; gradePass.uniforms.grade.value=FX.grade; gradePass.uniforms.sideLight.value=FX.sideLight;  // シネマ
     // dust drift
     const tt=clock.getElapsedTime();
     for(let i=0;i<N;i++){dp[i*3]=dbase[i*3]+Math.sin(dph[i]+tt*0.5)*0.06;dp[i*3+1]=dbase[i*3+1]+Math.cos(dph[i]*1.3+tt*0.4)*0.05;}

@@ -156,15 +156,23 @@
   }
  ],
  "fx": {
-  "smokeAmount": 0.55,
-  "smokeSpeed": 0.012,
-  "smokeCount": 8,
-  "particleCount": 2500,
-  "particleSize": 0.013,
-  "particleHalo": 0.6,
-  "logoHalo": 0.28,
-  "memberFeather": 0.05,
-  "memberCutout": 0.4,
-  "memberHalo": 0.2
+  "smokeAmount": 0.22,
+  "smokeSpeed": 0.004,
+  "smokeCount": 24,
+  "smokeHeight": -0.55,
+  "smokeSpread": 0.3,
+  "particleCount": 4100,
+  "particleSize": 0.009,
+  "particleHalo": 1.15,
+  "logoHalo": 0,
+  "memberFeather": 0.126,
+  "memberCutout": 0.9,
+  "memberHalo": 0.3,
+  "shadowDarkness": 0.34,
+  "shadowBlur": 0.5,
+  "shadowLength": 1.1,
+  "vignette": 0.34,
+  "grade": 0.28,
+  "sideLight": 0.3
  }
 }
