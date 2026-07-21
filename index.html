@@ -141,20 +141,19 @@ async function main(){
     const asp=innerWidth/innerHeight;
     const vt=Math.tan(camera.fov*Math.PI/360);
     const G=meta.group;
-    const Dw=(G.halfW*1.18)/(vt*Math.max(0.34,asp)), Dh=(G.halfH*1.18)/vt;   // グループ実寸をfit
-    const D=Math.max(Dw,Dh,1.5);
-    const hz=-G.gcz+D;                       // ヒーロー位置(グループ前D)
+    const Dw=(G.halfW*(meta.fit||0.86))/(vt*Math.max(0.34,asp)), Dh=(G.halfH*(meta.fit||0.86))/vt;
+    const D=Math.max(Dw,Dh,1.2);
+    const hz=-G.gcz+D;                       // ヒーロー位置(寄せて迫力)
     const start=-(G.gcz+0.4);                 // メンバーの背後(片面カリングで無人)
-    let z; if(t2<=CFG.revEnd) z=start+(hz-start)*sstep(t2/CFG.revEnd); else z=hz-0.3*eout((t2-CFG.revEnd)/(CFG.dur-CFG.revEnd));
+    let z; if(t2<=CFG.revEnd) z=start+(hz-start)*sstep(t2/CFG.revEnd); else z=hz-0.25*eout((t2-CFG.revEnd)/(CFG.dur-CFG.revEnd));
     ptx+=(tx-ptx)*0.06; pty+=(ty-pty)*0.06;
-    // シネマティック: クレーンで上→下降, 横に弧, 常にグループを見る(オービット感), 低い煽りで着地
-    const rp=Math.min(1,t2/CFG.revEnd), s=sstep(rp), wa=(1-rp);
-    const wx=Math.sin(rp*Math.PI*1.6)*1.7*wa;                       // 横スイング(収束)
-    const cy=G.gcy + (1.3*(1-s) + (-0.55)*s);                       // 上から入り→ヒーローは低め(煽り)
-    camera.position.set(G.gcx+wx+ptx*0.3, cy-pty*0.2, z);
-    camera.up.set(0,1,0); camera.lookAt(G.gcx, G.gcy+0.35, -G.gcz); // グループ注視+やや上=煽り
+    // 回り込み無し=真っ直ぐ-Z(板が見えない)。突き抜け中だけ小さく横スイング(収束)
+    const rp=Math.min(1,t2/CFG.revEnd), wa=(1-rp)*(1-rp);
+    const wx=Math.sin(rp*Math.PI*2.0)*0.8*wa;
+    camera.position.set(G.gcx+wx+ptx*0.3, G.gcy+(meta.camY||0.15)-pty*0.2, z);
+    camera.rotation.set(0,0,0);              // 真っ直ぐ(lookAt無し)
     applyShift();
-    afterimage.uniforms['damp'].value = t2<CFG.revEnd ? 0.5 : 0.18; // ブラー弱め・ヒーローで解除
+    afterimage.uniforms['damp'].value = t2<CFG.revEnd ? 0.5 : 0.18;
     // logo appear @7s
     const la=Math.min(1,Math.max(0,(t2-7.0)/0.6)); lmat.opacity=la;
     // dust drift
