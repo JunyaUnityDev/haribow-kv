@@ -113,7 +113,9 @@ async function main(){
   applyShift();
   document.getElementById('load').style.opacity=0;
   const enterEl=document.getElementById('enter');
-  setTimeout(()=>{document.getElementById('load').style.display='none';enterEl.style.display='flex';},900);
+  const DBG=new URLSearchParams(location.search).get('t')!=null;
+  if(DBG){document.getElementById('load').style.display='none';started=true;}
+  setTimeout(()=>{document.getElementById('load').style.display='none';if(!DBG)enterEl.style.display='flex';},900);
   enterEl.addEventListener('pointerdown',async()=>{
     if(typeof DeviceOrientationEvent!=='undefined'&&DeviceOrientationEvent.requestPermission){
       try{await DeviceOrientationEvent.requestPermission();}catch(e){}
@@ -134,8 +136,12 @@ async function main(){
     const raw = FREEZE!=null?parseFloat(FREEZE):(started?clock.getElapsedTime():0);
     const el=raw%CFG.dur, t2=el;
     // camera reveal (ヒーロー位置=アスペクトで自動フィット: 縦画面ほど引いて全員入れる)
+    // グループを必ず余白付きで収めるフィットカメラ(どのアスペクトでも見切れ無し)
     const asp=innerWidth/innerHeight;
-    const hz=Math.min(1.6, Math.max(-1.2, 4.0/Math.max(0.5,asp) - 6.0));
+    const vt=Math.tan(camera.fov*Math.PI/360);
+    const gs=meta.group.gs, gz=meta.group.gz;
+    const Dw=3.55*gs/(vt*Math.max(0.34,asp)), Dh=2.0*gs/vt;   // 幅fit / 高さfit
+    const hz=gz+Math.max(Dw,Dh,2.0);
     let z; if(t2<=CFG.revEnd) z=-8.5+(hz+8.5)*eout(t2/CFG.revEnd); else z=hz-0.4*eout((t2-CFG.revEnd)/(CFG.dur-CFG.revEnd));
     ptx+=(tx-ptx)*0.06; pty+=(ty-pty)*0.06;
     camera.position.set(ptx*0.35, -pty*0.22, z); applyShift();
