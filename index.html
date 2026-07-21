@@ -66,7 +66,8 @@ async function main(){
     logoHalo:0.28,                                             // ロゴのハロー
     memberFeather:0.05, memberCutout:0.40, memberHalo:0.35,    // メンバー: ふちぼかし / 切り取り / ハロー(発光)
     shadowDarkness:0.34, shadowBlur:0.5, shadowLength:1.1,     // 落ち影: 濃さ / ぼかし / 長さ(カメラ側へ)
-    vignette:0.34, grade:0.28, sideLight:0.30                  // シネマ: ビネット / グレード(寒→暖) / サイド光
+    vignette:0.34, grade:0.28, sideLight:0.30,                 // シネマ: ビネット / グレード(寒→暖) / サイド光
+    bloomStrength:0.55, bloomRadius:0.7, bloomThreshold:0.75   // ブルーム(全体の発光滲み): 強さ / 半径 / しきい値
   }, meta.fx||{});
   const FX=meta.fx;
   // ソフト円形テクスチャ(粒子/ハロー用: 中心白→縁透明)
@@ -201,7 +202,7 @@ async function main(){
   const composer=new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene,camera));
   const afterimage=new AfterimagePass(0.7); composer.addPass(afterimage);   // モーションブラー(動く時だけ)
-  const bloom=new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),CFG.bloom,0.7,0.75);
+  const bloom=new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),FX.bloomStrength,FX.bloomRadius,FX.bloomThreshold);
   composer.addPass(bloom);
   // ---- シネマ仕上げ(ビネット + グレード寒→暖 + サイド光) 一括ポストパス ----
   const gradePass=new ShaderPass({uniforms:{tDiffuse:{value:null},vignette:{value:FX.vignette},grade:{value:FX.grade},sideLight:{value:FX.sideLight}},
@@ -268,7 +269,10 @@ async function main(){
       {k:'shadowLength',label:'落ち影の長さ',step:0.06,min:0.1,max:3},
       {k:'vignette',label:'ビネット',step:0.03,min:0,max:1.5},
       {k:'grade',label:'グレード寒暖',step:0.03,min:0,max:1.5},
-      {k:'sideLight',label:'サイド光',step:0.03,min:0,max:1.5}
+      {k:'sideLight',label:'サイド光',step:0.03,min:0,max:1.5},
+      {k:'bloomStrength',label:'ブルーム強さ',step:0.05,min:0,max:3},
+      {k:'bloomRadius',label:'ブルーム半径',step:0.03,min:0,max:1.5},
+      {k:'bloomThreshold',label:'ブルームしきい値',step:0.02,min:0,max:1}
     ];
     let fxi=0;
     const ASPS=[['Fill',null],['16:9',16/9],['16:10',16/10],['21:9',21/9],['4:3',4/3],['iPhone',390/844]];
@@ -436,6 +440,7 @@ async function main(){
     }
     dust.material.size=FX.particleSize; dust.material.opacity=FX.particleHalo;   // 粒子: 細かさ/ハロー
     gradePass.uniforms.vignette.value=FX.vignette; gradePass.uniforms.grade.value=FX.grade; gradePass.uniforms.sideLight.value=FX.sideLight;  // シネマ
+    bloom.strength=FX.bloomStrength; bloom.radius=FX.bloomRadius; bloom.threshold=FX.bloomThreshold;   // ブルーム(全体発光)
     // dust drift
     const tt=clock.getElapsedTime();
     for(let i=0;i<N;i++){dp[i*3]=dbase[i*3]+Math.sin(dph[i]+tt*0.5)*0.06;dp[i*3+1]=dbase[i*3+1]+Math.cos(dph[i]*1.3+tt*0.4)*0.05;}
