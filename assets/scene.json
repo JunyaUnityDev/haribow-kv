@@ -145,6 +145,14 @@
    "logoScale": 1.1951,
    "logoYoff": -0.024,
    "logoX": 0
+  },
+  {
+   "aspect": 1.3333,
+   "fit": 1.22,
+   "camY": 0.31,
+   "logoScale": 1.1041,
+   "logoYoff": -0.104,
+   "logoX": 0
   }
  ]
 }
