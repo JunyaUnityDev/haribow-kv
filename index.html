@@ -34,7 +34,7 @@ const errShow=m=>{const l=document.getElementById('load');if(l){l.textContent='E
 window.onerror=(m,s,ln)=>errShow(m+' @'+ln);
 addEventListener('unhandledrejection',e=>errShow('REJ '+(e.reason&&e.reason.message||e.reason)));
 
-const CFG = { shiftY: 0.0, bloom:0.55, dust:1500, dur:20.0, revEnd:3.0 };
+const CFG = { shiftY: 0.0, bloom:0.55, dust:1500, dur:20.0, revEnd:4.0 };
 let F=1600, W=1600, Hext=1589, CY=794;   // 実写背景(scene.jsonから上書き)
 const dZ = dn => 2.0 + (1.0-dn)*7.0;
 
@@ -129,6 +129,7 @@ async function main(){
   addEventListener('pointermove',e=>{tx=(e.clientX/innerWidth*2-1);ty=(e.clientY/innerHeight*2-1);});
 
   const eout=x=>{x=Math.min(1,Math.max(0,x));return 1-(1-x)**3;};
+  const sstep=x=>{x=Math.min(1,Math.max(0,x));return x*x*x*(x*(x*6-15)+10);};   // ease-in-out(滑らか)
   const FREEZE=new URLSearchParams(location.search).get('t');   // ?t=秒 で固定(検証用)
   function frame(){
     const raw = FREEZE!=null?parseFloat(FREEZE):(started?clock.getElapsedTime():0);
@@ -142,7 +143,7 @@ async function main(){
     const D=Math.max(Dw,Dh,1.5);
     const hz=-G.gcz+D;                       // ヒーロー位置(グループ前D)
     const start=hz+7.0;                       // 引いた広い会場からズームイン
-    let z; if(t2<=CFG.revEnd) z=start+(hz-start)*eout(t2/CFG.revEnd); else z=hz-0.35*eout((t2-CFG.revEnd)/(CFG.dur-CFG.revEnd));
+    let z; if(t2<=CFG.revEnd) z=start+(hz-start)*sstep(t2/CFG.revEnd); else z=hz-0.3*eout((t2-CFG.revEnd)/(CFG.dur-CFG.revEnd));
     ptx+=(tx-ptx)*0.06; pty+=(ty-pty)*0.06;
     camera.position.set(G.gcx+ptx*0.3, G.gcy-pty*0.2, z); applyShift();   // グループ中心に照準
     // logo appear @7s
