@@ -85,14 +85,12 @@ async function main(){
   const logo=new THREE.Mesh(new THREE.PlaneGeometry(L.wl,L.wl*L.asp),lmat);
   logo.position.set(L.x,L.y,-L.z); logo.renderOrder=0; scene.add(logo);
 
-  // ---- members (グループ変換で実写ステージに再配置) ----
-  const G=meta.group; const Cw=[G.cx, G.cy, -G.cz];
+  // ---- members (整合配置=Hで拡大背景に合わせた3D座標に直接配置) ----
   for(const m of meta.members){
     const t=await load(m.file);
     const mat=new THREE.MeshBasicMaterial({map:t,transparent:true,alphaTest:0.35,side:THREE.FrontSide,depthWrite:true});
-    const mesh=new THREE.Mesh(new THREE.PlaneGeometry(m.Wc*G.gs, m.Hc*G.gs),mat);
-    const mw=[m.Xc, m.Yc+(m.dy||0), -m.Zm+0.25];
-    mesh.position.set(G.gx+G.gs*(mw[0]-Cw[0]), G.gy+G.gs*(mw[1]-Cw[1]), G.gz+G.gs*(mw[2]-Cw[2]));
+    const mesh=new THREE.Mesh(new THREE.PlaneGeometry(m.Wc, m.Hc),mat);
+    mesh.position.set(m.Xc, m.Yc, -m.Zm);
     mesh.renderOrder=1; scene.add(mesh);
   }
 
@@ -139,12 +137,14 @@ async function main(){
     // グループを必ず余白付きで収めるフィットカメラ(どのアスペクトでも見切れ無し)
     const asp=innerWidth/innerHeight;
     const vt=Math.tan(camera.fov*Math.PI/360);
-    const gs=meta.group.gs, gz=meta.group.gz;
-    const Dw=3.55*gs/(vt*Math.max(0.34,asp)), Dh=2.0*gs/vt;   // 幅fit / 高さfit
-    const hz=gz+Math.max(Dw,Dh,2.0);
-    let z; if(t2<=CFG.revEnd) z=-8.5+(hz+8.5)*eout(t2/CFG.revEnd); else z=hz-0.4*eout((t2-CFG.revEnd)/(CFG.dur-CFG.revEnd));
+    const G=meta.group;
+    const Dw=(G.halfW*1.18)/(vt*Math.max(0.34,asp)), Dh=(G.halfH*1.18)/vt;   // グループ実寸をfit
+    const D=Math.max(Dw,Dh,1.5);
+    const hz=-G.gcz+D;                       // ヒーロー位置(グループ前D)
+    const deep=-G.gcz-1.6;                    // 無人スタート(グループの奥)
+    let z; if(t2<=CFG.revEnd) z=deep+(hz-deep)*eout(t2/CFG.revEnd); else z=hz-0.35*eout((t2-CFG.revEnd)/(CFG.dur-CFG.revEnd));
     ptx+=(tx-ptx)*0.06; pty+=(ty-pty)*0.06;
-    camera.position.set(ptx*0.35, -pty*0.22, z); applyShift();
+    camera.position.set(G.gcx+ptx*0.3, G.gcy-pty*0.2, z); applyShift();   // グループ中心に照準
     // logo appear @7s
     const la=Math.min(1,Math.max(0,(t2-7.0)/0.6)); lmat.opacity=la;
     // dust drift
