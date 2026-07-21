@@ -142,7 +142,7 @@ async function main(){
     const Dw=(G.halfW*1.18)/(vt*Math.max(0.34,asp)), Dh=(G.halfH*1.18)/vt;   // グループ実寸をfit
     const D=Math.max(Dw,Dh,1.5);
     const hz=-G.gcz+D;                       // ヒーロー位置(グループ前D)
-    const start=hz+7.0;                       // 引いた広い会場からズームイン
+    const start=-(G.gcz+0.4);                 // メンバーの背後(片面カリングで無人)→前方へ抜けてヒーロー
     let z; if(t2<=CFG.revEnd) z=start+(hz-start)*sstep(t2/CFG.revEnd); else z=hz-0.3*eout((t2-CFG.revEnd)/(CFG.dur-CFG.revEnd));
     ptx+=(tx-ptx)*0.06; pty+=(ty-pty)*0.06;
     camera.position.set(G.gcx+ptx*0.3, G.gcy-pty*0.2, z); applyShift();   // グループ中心に照準
