@@ -230,10 +230,11 @@ async function main(){
         else hit=false;
         if(hit)applyMember(o);
       } else if(target==='camera'){
-        const s=e.shiftKey?0.04:0.01;
+        const s=e.shiftKey?0.08:0.02;
+        const fs=e.shiftKey?0.12:0.03;
         if(e.key==='ArrowUp')meta.camY+=s; else if(e.key==='ArrowDown')meta.camY-=s;
-        else if(e.key==='+'||e.key==='=')meta.fit=Math.max(0.2,meta.fit-(e.shiftKey?0.04:0.01));   // 寄る
-        else if(e.key==='-'||e.key==='_')meta.fit=Math.min(2.0,meta.fit+(e.shiftKey?0.04:0.01));   // 引く
+        else if(e.key==='+'||e.key==='=')meta.fit=Math.max(0.2,meta.fit-fs);   // 寄る
+        else if(e.key==='-'||e.key==='_')meta.fit=Math.min(2.5,meta.fit+fs);   // 引く
         else hit=false;
       } else {
         const s=e.shiftKey?0.04:0.008;
@@ -256,7 +257,7 @@ async function main(){
     const vt=Math.tan(camera.fov*Math.PI/360);
     const G=meta.group;
     const Dw=(G.halfW*(meta.fit||0.86))/(vt*Math.max(0.34,asp)), Dh=(G.halfH*(meta.fit||0.86))/vt;
-    const D=Math.max(Dw,Dh,1.2);
+    const D=Math.max(Dw,Dh,0.6);
     const hz=-G.gcz+D;                       // ヒーロー位置(寄せて迫力)
     const start=-(G.gcz+0.4);                 // メンバーの背後(片面カリングで無人)
     let z; if(t2<=CFG.revEnd) z=start+(hz-start)*sstep(t2/CFG.revEnd); else z=hz-0.25*eout((t2-CFG.revEnd)/(CFG.dur-CFG.revEnd));
