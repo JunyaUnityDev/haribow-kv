@@ -96,7 +96,7 @@ async function main(){
   const L=meta.logo, lt=await load('assets/logo.png');
   const lmat=new THREE.MeshBasicMaterial({map:lt,transparent:true,opacity:0,side:THREE.FrontSide,depthTest:false,depthWrite:false});
   const logo=new THREE.Mesh(new THREE.PlaneGeometry(L.wl,L.wl*L.asp),lmat);
-  logo.position.set(L.x,L.y,-L.z); logo.renderOrder=3; scene.add(logo);   // 常に最前面(下げてもメンバーに隠れない)
+  logo.position.set(L.x,L.y,-L.z); logo.renderOrder=0; scene.add(logo);   // メンバーの後ろ(最前面にしない)
 
   // ---- 接地シャドウ用ソフト楕円テクスチャ ----
   const scv=document.createElement('canvas'); scv.width=scv.height=128;
@@ -169,13 +169,20 @@ async function main(){
   // ================= 手動配置モード =================
   if(EDIT){
     started=true;
-    if(meta.fit==null)meta.fit=0.74; if(meta.camY==null)meta.camY=0.05;
+    if(meta.fit==null)meta.fit=0.86; if(meta.camY==null)meta.camY=0.15;
     if(meta.logoScale==null)meta.logoScale=1; if(meta.logoYoff==null)meta.logoYoff=0; if(meta.logoX==null)meta.logoX=0;
     const NAMES={m0:'まきと',m1:'りゅーすけ',m2:'潤弥',m3:'だいすけ',m4:'周平',m5:'まほろ',m6:'海野',m7:'ケンタ'};
     let sel=memObjs.length-1;   // 既定=ケンタ(前列)
     let target='member';        // member | camera | logo
     const ASPS=[['Fill',null],['16:9',16/9],['16:10',16/10],['21:9',21/9],['4:3',4/3],['iPhone',390/844]];
-    forceAspect=16/9;           // 既定=横長で足まで見えやすく
+    forceAspect=390/844;        // 既定=iPhone(今の値がiPhone用)
+    // アスペクト別設定の作業マップ(切替で保存/読込・Exportで全view書き出し)
+    let curAsp=forceAspect;
+    const vkey=a=>a==null?'fill':(+a).toFixed(3);
+    const vmap={}; (meta.views||[]).forEach(v=>{vmap[vkey(v.aspect)]=Object.assign({},v);});
+    const saveCur=()=>{vmap[vkey(curAsp)]={aspect:curAsp,fit:meta.fit,camY:meta.camY,logoScale:meta.logoScale,logoYoff:meta.logoYoff,logoX:meta.logoX};};
+    const loadAsp=a=>{const v=vmap[vkey(a)]; if(v){meta.fit=v.fit;meta.camY=v.camY;meta.logoScale=v.logoScale;meta.logoYoff=v.logoYoff;meta.logoX=v.logoX;}};
+    saveCur();   // 現在値をiPhone枠として記録
     const key=o=>o.m.file.split('/').pop().replace('.png','');
     const panel=document.createElement('div');
     panel.style.cssText='position:fixed;top:8px;left:8px;z-index:9999;background:rgba(0,0,0,.84);color:#fff;font:12px/1.55 -apple-system,sans-serif;padding:10px 12px;border-radius:8px;max-width:270px;user-select:none';
@@ -201,17 +208,17 @@ async function main(){
       }
       panel.innerHTML='<b>配置モード</b>'
         +'<div style="margin:5px 0;display:flex;gap:3px">'+btn('メンバー',target==='member','data-t="member"')+btn('カメラ',target==='camera','data-t="camera"')+btn('ロゴ',target==='logo','data-t="logo"')+'</div>'
-        +'<div style="margin:5px 0;display:flex;flex-wrap:wrap;gap:3px">アスペクト: '+ASPS.map(a=>btn(a[0],forceAspect===a[1],'data-a="'+(a[1]==null?'':a[1])+'"')).join('')+'</div>'
+        +'<div style="margin:5px 0;display:flex;flex-wrap:wrap;gap:3px">アスペクト: '+ASPS.map(a=>btn(a[0]+(vmap[vkey(a[1])]?'●':''),forceAspect===a[1],'data-a="'+(a[1]==null?'':a[1])+'"')).join('')+'</div>'
         +body
-        +'<div style="margin-top:6px;font-size:11px">Shift=大きく動く <b style="color:#fe7">E=Export</b></div>';
+        +'<div style="margin-top:6px;font-size:11px">Shift=大きく動く / ●=設定済 <b style="color:#fe7">E=Export</b></div>';
       panel.querySelectorAll('[data-mi]').forEach(b=>b.onclick=()=>{sel=+b.dataset.mi;draw();});
       panel.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{target=b.dataset.t;draw();});
-      panel.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{forceAspect=b.dataset.a===''?null:+b.dataset.a;if(window.__applyViewport)window.__applyViewport();draw();});
+      panel.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{saveCur();forceAspect=b.dataset.a===''?null:+b.dataset.a;curAsp=forceAspect;loadAsp(curAsp);if(window.__applyViewport)window.__applyViewport();draw();});
     };
     const exportJSON=()=>{
+      saveCur();
       const out={
-        fit:+meta.fit.toFixed(4), camY:+meta.camY.toFixed(4),
-        logoScale:+meta.logoScale.toFixed(4), logoYoff:+meta.logoYoff.toFixed(4), logoX:+meta.logoX.toFixed(4),
+        views:Object.values(vmap).map(v=>({aspect:v.aspect==null?null:+(+v.aspect).toFixed(4),fit:+v.fit.toFixed(4),camY:+v.camY.toFixed(4),logoScale:+v.logoScale.toFixed(4),logoYoff:+v.logoYoff.toFixed(4),logoX:+v.logoX.toFixed(4)})),
         members:meta.members.map(m=>({file:m.file,Xc:+m.Xc.toFixed(4),Yc:+m.Yc.toFixed(4),Zm:+m.Zm.toFixed(3),Wc:+m.Wc.toFixed(4),Hc:+m.Hc.toFixed(4),dy:+((m.dy||0)).toFixed(4),padFrac:m.padFrac||0}))
       };
       const blob=new Blob([JSON.stringify(out,null,2)],{type:'application/json'});
@@ -248,6 +255,16 @@ async function main(){
     draw();
   }
 
+  // アスペクト別設定の選択。編集中はmeta生値(スライダー直結)、公開時はviewsから最も近いアスペクトを採用
+  const baseCF=()=>({fit:(meta.fit!=null?meta.fit:0.86),camY:(meta.camY!=null?meta.camY:0.15),logoScale:(meta.logoScale||1),logoYoff:(meta.logoYoff||0),logoX:(meta.logoX||0)});
+  function pickView(asp){
+    const b=baseCF();
+    if(EDIT || !meta.views || !meta.views.length) return b;
+    let best=null,bd=1e9;
+    for(const v of meta.views){const d=Math.abs(Math.log((v.aspect||1)/asp)); if(d<bd){bd=d;best=v;}}
+    if(!best) return b;
+    return {fit:best.fit??b.fit,camY:best.camY??b.camY,logoScale:best.logoScale??b.logoScale,logoYoff:best.logoYoff??b.logoYoff,logoX:best.logoX??b.logoX};
+  }
   function frame(){
     const raw = FREEZE!=null?parseFloat(FREEZE):(started?clock.getElapsedTime():0);
     const el=EDIT?CFG.dur:(raw%CFG.dur), t2=el;
@@ -256,7 +273,9 @@ async function main(){
     const asp=VW/VH;
     const vt=Math.tan(camera.fov*Math.PI/360);
     const G=meta.group;
-    const Dw=(G.halfW*(meta.fit||0.86))/(vt*Math.max(0.34,asp)), Dh=(G.halfH*(meta.fit||0.86))/vt;
+    // アスペクト別設定(編集中は生値/公開時は最も近いviewを採用)
+    const CF=pickView(asp);
+    const Dw=(G.halfW*CF.fit)/(vt*Math.max(0.34,asp)), Dh=(G.halfH*CF.fit)/vt;
     const D=Math.max(Dw,Dh,0.6);
     const hz=-G.gcz+D;                       // ヒーロー位置(寄せて迫力)
     const start=-(G.gcz+0.4);                 // メンバーの背後(片面カリングで無人)
@@ -265,14 +284,14 @@ async function main(){
     // 回り込み無し=真っ直ぐ-Z(板が見えない)。突き抜け中だけ小さく横スイング(収束)
     const rp=Math.min(1,t2/CFG.revEnd), wa=(1-rp)*(1-rp);
     const wx=Math.sin(rp*Math.PI*2.0)*0.8*wa;
-    camera.position.set(G.gcx+wx+ptx*0.3, G.gcy+(meta.camY||0.15)-pty*0.2, z);
+    camera.position.set(G.gcx+wx+ptx*0.3, G.gcy+CF.camY-pty*0.2, z);
     camera.rotation.set(0,0,0);              // 真っ直ぐ(lookAt無し)
     applyShift();
     // ロゴをフレーム内上部へ自動配置+contain(幅と高さ両方に収める=全アスペクトで適正)
     { const Zl=L.z, dl=z+Zl, vH=vt*dl, vW=vt*Math.max(0.34,asp)*dl;
-      const lw=Math.min(vW*0.82, vH*0.62/L.asp)*(meta.logoScale||1), lsc=lw/L.wl; logo.scale.set(lsc,lsc,1);
+      const lw=Math.min(vW*0.82, vH*0.62/L.asp)*CF.logoScale, lsc=lw/L.wl; logo.scale.set(lsc,lsc,1);
       const lH=L.wl*L.asp*lsc;
-      logo.position.set(G.gcx+(meta.logoX||0)*vW, (G.gcy+(meta.camY||0.15))+vH-lH/2-vH*0.05+(meta.logoYoff||0)*vH, -Zl); }
+      logo.position.set(G.gcx+CF.logoX*vW, (G.gcy+CF.camY)+vH-lH/2-vH*0.05+CF.logoYoff*vH, -Zl); }
     afterimage.uniforms['damp'].value = t2<CFG.revEnd ? 0.5 : 0.18;
     // logo appear @7s
     const la=Math.min(1,Math.max(0,(t2-7.0)/0.6)); lmat.opacity=la;

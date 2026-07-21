@@ -104,5 +104,15 @@
  "camY": 0.31,
  "logoScale": 1.1041,
  "logoYoff": -0.488,
- "logoX": 0
+ "logoX": 0,
+ "views": [
+  {
+   "aspect": 0.4621,
+   "fit": 0.86,
+   "camY": 0.31,
+   "logoScale": 1.1041,
+   "logoYoff": -0.488,
+   "logoX": 0
+  }
+ ]
 }
