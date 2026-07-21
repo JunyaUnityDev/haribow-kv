@@ -37,6 +37,7 @@ addEventListener('unhandledrejection',e=>errShow('REJ '+(e.reason&&e.reason.mess
 
 const CFG = { shiftY: 0.0, bloom:0.55, dust:1500, dur:20.0, revEnd:4.0 };
 let F=1600, W=1600, Hext=1589, CY=794;   // 実写背景(scene.jsonから上書き)
+let VW=innerWidth, VH=innerHeight, forceAspect=null;   // レンダ実寸(編集モードのアスペクト固定用)
 const dZ = dn => 2.0 + (1.0-dn)*7.0;
 
 const renderer = new THREE.WebGLRenderer({canvas:document.getElementById('c'), antialias:true});
@@ -168,40 +169,80 @@ async function main(){
   // ================= 手動配置モード =================
   if(EDIT){
     started=true;
+    if(meta.fit==null)meta.fit=0.74; if(meta.camY==null)meta.camY=0.05;
+    if(meta.logoScale==null)meta.logoScale=1; if(meta.logoYoff==null)meta.logoYoff=0; if(meta.logoX==null)meta.logoX=0;
     const NAMES={m0:'まきと',m1:'りゅーすけ',m2:'潤弥',m3:'だいすけ',m4:'周平',m5:'まほろ',m6:'海野',m7:'ケンタ'};
     let sel=memObjs.length-1;   // 既定=ケンタ(前列)
+    let target='member';        // member | camera | logo
+    const ASPS=[['Fill',null],['16:9',16/9],['16:10',16/10],['21:9',21/9],['4:3',4/3],['iPhone',390/844]];
+    forceAspect=16/9;           // 既定=横長で足まで見えやすく
     const key=o=>o.m.file.split('/').pop().replace('.png','');
     const panel=document.createElement('div');
-    panel.style.cssText='position:fixed;top:8px;left:8px;z-index:9999;background:rgba(0,0,0,.82);color:#fff;font:12px/1.5 -apple-system,sans-serif;padding:10px 12px;border-radius:8px;max-width:240px;user-select:none';
+    panel.style.cssText='position:fixed;top:8px;left:8px;z-index:9999;background:rgba(0,0,0,.84);color:#fff;font:12px/1.55 -apple-system,sans-serif;padding:10px 12px;border-radius:8px;max-width:270px;user-select:none';
     document.body.appendChild(panel);
+    const btn=(label,on,extra)=>'<button '+extra+' style="padding:2px 6px;border:0;border-radius:4px;cursor:pointer;background:'+(on?'#3a7':'#444')+';color:#fff">'+label+'</button>';
     const draw=()=>{
       const o=memObjs[sel], m=o.m;
-      panel.innerHTML='<b>配置モード</b> — 選択: <span style="color:#7cf">'+NAMES[key(o)]+'('+key(o)+')</span>'
-        +'<div style="margin:6px 0;display:flex;flex-wrap:wrap;gap:3px">'
-        +memObjs.map((oo,i)=>'<button data-i="'+i+'" style="padding:2px 5px;border:0;border-radius:4px;cursor:pointer;background:'+(i===sel?'#3a7':'#444')+';color:#fff">'+NAMES[key(oo)]+'</button>').join('')
-        +'</div>'
-        +'dy(上下): '+(m.dy||0).toFixed(4)+' / X(左右): '+m.Xc.toFixed(3)+' / 大きさ: '+m.Wc.toFixed(3)
-        +'<div style="margin-top:6px;color:#bbb;font-size:11px">↑↓=上下  ←→=左右  +/-=大きさ<br>Shift=大きく動く  0〜7=選択切替<br><b style="color:#fe7">E=Exportして書き出し</b></div>';
-      panel.querySelectorAll('button').forEach(b=>b.onclick=()=>{sel=+b.dataset.i;draw();});
+      let body='';
+      if(target==='member'){
+        body='<div style="margin:5px 0;display:flex;flex-wrap:wrap;gap:3px">'
+          +memObjs.map((oo,i)=>btn(NAMES[key(oo)],i===sel,'data-mi="'+i+'"')).join('')+'</div>'
+          +'選択: <span style="color:#7cf">'+NAMES[key(o)]+'('+key(o)+')</span><br>'
+          +'dy(上下): '+(m.dy||0).toFixed(4)+' / X(左右): '+m.Xc.toFixed(3)+' / 大きさ: '+m.Wc.toFixed(3)
+          +'<div style="margin-top:5px;color:#bbb;font-size:11px">↑↓=上下 ←→=左右 +/−=大きさ / 0〜7=人選択</div>';
+      } else if(target==='camera'){
+        body='<div style="color:#7cf;margin:4px 0">カメラ最終位置</div>'
+          +'引き(fit): '+meta.fit.toFixed(3)+' / 上下(camY): '+meta.camY.toFixed(3)
+          +'<div style="margin-top:5px;color:#bbb;font-size:11px">+/−=引き(大=引く/小=寄る)<br>↑↓=上下</div>';
+      } else {
+        body='<div style="color:#7cf;margin:4px 0">ロゴ</div>'
+          +'大きさ: '+meta.logoScale.toFixed(3)+' / 上下: '+meta.logoYoff.toFixed(3)+' / 左右: '+meta.logoX.toFixed(3)
+          +'<div style="margin-top:5px;color:#bbb;font-size:11px">+/−=大きさ ↑↓=上下 ←→=左右</div>';
+      }
+      panel.innerHTML='<b>配置モード</b>'
+        +'<div style="margin:5px 0;display:flex;gap:3px">'+btn('メンバー',target==='member','data-t="member"')+btn('カメラ',target==='camera','data-t="camera"')+btn('ロゴ',target==='logo','data-t="logo"')+'</div>'
+        +'<div style="margin:5px 0;display:flex;flex-wrap:wrap;gap:3px">アスペクト: '+ASPS.map(a=>btn(a[0],forceAspect===a[1],'data-a="'+(a[1]==null?'':a[1])+'"')).join('')+'</div>'
+        +body
+        +'<div style="margin-top:6px;font-size:11px">Shift=大きく動く <b style="color:#fe7">E=Export</b></div>';
+      panel.querySelectorAll('[data-mi]').forEach(b=>b.onclick=()=>{sel=+b.dataset.mi;draw();});
+      panel.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{target=b.dataset.t;draw();});
+      panel.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{forceAspect=b.dataset.a===''?null:+b.dataset.a;if(window.__applyViewport)window.__applyViewport();draw();});
     };
     const exportJSON=()=>{
-      const out=meta.members.map(m=>({file:m.file,Xc:+m.Xc.toFixed(4),Yc:+m.Yc.toFixed(4),Zm:+m.Zm.toFixed(3),Wc:+m.Wc.toFixed(4),Hc:+m.Hc.toFixed(4),dy:+((m.dy||0)).toFixed(4),padFrac:m.padFrac||0}));
+      const out={
+        fit:+meta.fit.toFixed(4), camY:+meta.camY.toFixed(4),
+        logoScale:+meta.logoScale.toFixed(4), logoYoff:+meta.logoYoff.toFixed(4), logoX:+meta.logoX.toFixed(4),
+        members:meta.members.map(m=>({file:m.file,Xc:+m.Xc.toFixed(4),Yc:+m.Yc.toFixed(4),Zm:+m.Zm.toFixed(3),Wc:+m.Wc.toFixed(4),Hc:+m.Hc.toFixed(4),dy:+((m.dy||0)).toFixed(4),padFrac:m.padFrac||0}))
+      };
       const blob=new Blob([JSON.stringify(out,null,2)],{type:'application/json'});
-      const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='members_edited.json'; a.click();
+      const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='kv_edited.json'; a.click();
       console.log(JSON.stringify(out));
     };
     addEventListener('keydown',e=>{
-      if(e.key>='0'&&e.key<='7'){const i=+e.key;if(i<memObjs.length){sel=i;draw();}return;}
       if(e.key==='e'||e.key==='E'){exportJSON();return;}
-      const o=memObjs[sel], m=o.m, s=e.shiftKey?0.02:0.004; let hit=true;
-      if(e.key==='ArrowUp')m.dy=(m.dy||0)+s;
-      else if(e.key==='ArrowDown')m.dy=(m.dy||0)-s;
-      else if(e.key==='ArrowLeft')m.Xc-=s;
-      else if(e.key==='ArrowRight')m.Xc+=s;
-      else if(e.key==='+'||e.key==='='){m.Wc*=1.015;m.Hc*=1.015;}
-      else if(e.key==='-'||e.key==='_'){m.Wc/=1.015;m.Hc/=1.015;}
-      else hit=false;
-      if(hit){e.preventDefault();applyMember(o);draw();}
+      if(target==='member'&&e.key>='0'&&e.key<='7'){const i=+e.key;if(i<memObjs.length){sel=i;draw();}return;}
+      let hit=true;
+      if(target==='member'){
+        const o=memObjs[sel], m=o.m, s=e.shiftKey?0.02:0.004;
+        if(e.key==='ArrowUp')m.dy=(m.dy||0)+s; else if(e.key==='ArrowDown')m.dy=(m.dy||0)-s;
+        else if(e.key==='ArrowLeft')m.Xc-=s; else if(e.key==='ArrowRight')m.Xc+=s;
+        else if(e.key==='+'||e.key==='='){m.Wc*=1.015;m.Hc*=1.015;} else if(e.key==='-'||e.key==='_'){m.Wc/=1.015;m.Hc/=1.015;}
+        else hit=false;
+        if(hit)applyMember(o);
+      } else if(target==='camera'){
+        const s=e.shiftKey?0.04:0.01;
+        if(e.key==='ArrowUp')meta.camY+=s; else if(e.key==='ArrowDown')meta.camY-=s;
+        else if(e.key==='+'||e.key==='=')meta.fit=Math.max(0.2,meta.fit-(e.shiftKey?0.04:0.01));   // 寄る
+        else if(e.key==='-'||e.key==='_')meta.fit=Math.min(2.0,meta.fit+(e.shiftKey?0.04:0.01));   // 引く
+        else hit=false;
+      } else {
+        const s=e.shiftKey?0.04:0.008;
+        if(e.key==='ArrowUp')meta.logoYoff+=s; else if(e.key==='ArrowDown')meta.logoYoff-=s;
+        else if(e.key==='ArrowLeft')meta.logoX-=s; else if(e.key==='ArrowRight')meta.logoX+=s;
+        else if(e.key==='+'||e.key==='=')meta.logoScale*=1.02; else if(e.key==='-'||e.key==='_')meta.logoScale/=1.02;
+        else hit=false;
+      }
+      if(hit){e.preventDefault();draw();}
     });
     draw();
   }
@@ -211,7 +252,7 @@ async function main(){
     const el=EDIT?CFG.dur:(raw%CFG.dur), t2=el;
     // camera reveal (ヒーロー位置=アスペクトで自動フィット: 縦画面ほど引いて全員入れる)
     // グループを必ず余白付きで収めるフィットカメラ(どのアスペクトでも見切れ無し)
-    const asp=innerWidth/innerHeight;
+    const asp=VW/VH;
     const vt=Math.tan(camera.fov*Math.PI/360);
     const G=meta.group;
     const Dw=(G.halfW*(meta.fit||0.86))/(vt*Math.max(0.34,asp)), Dh=(G.halfH*(meta.fit||0.86))/vt;
@@ -228,9 +269,9 @@ async function main(){
     applyShift();
     // ロゴをフレーム内上部へ自動配置+contain(幅と高さ両方に収める=全アスペクトで適正)
     { const Zl=L.z, dl=z+Zl, vH=vt*dl, vW=vt*Math.max(0.34,asp)*dl;
-      const lw=Math.min(vW*0.82, vH*0.62/L.asp), lsc=lw/L.wl; logo.scale.set(lsc,lsc,1);
+      const lw=Math.min(vW*0.82, vH*0.62/L.asp)*(meta.logoScale||1), lsc=lw/L.wl; logo.scale.set(lsc,lsc,1);
       const lH=L.wl*L.asp*lsc;
-      logo.position.set(G.gcx, (G.gcy+(meta.camY||0.15))+vH-lH/2-vH*0.05, -Zl); }
+      logo.position.set(G.gcx+(meta.logoX||0)*vW, (G.gcy+(meta.camY||0.15))+vH-lH/2-vH*0.05+(meta.logoYoff||0)*vH, -Zl); }
     afterimage.uniforms['damp'].value = t2<CFG.revEnd ? 0.5 : 0.18;
     // logo appear @7s
     const la=Math.min(1,Math.max(0,(t2-7.0)/0.6)); lmat.opacity=la;
@@ -241,8 +282,17 @@ async function main(){
     composer.render();
     requestAnimationFrame(frame);
   }
+  function applyViewport(){
+    if(forceAspect){ let w=innerWidth,h=Math.round(w/forceAspect); if(h>innerHeight){h=innerHeight;w=Math.round(h*forceAspect);} VW=w;VH=h; }
+    else { VW=innerWidth; VH=innerHeight; }
+    renderer.setSize(VW,VH,false);
+    const cs=renderer.domElement.style; cs.width=VW+'px'; cs.height=VH+'px'; cs.position='fixed';
+    cs.left=Math.round((innerWidth-VW)/2)+'px'; cs.top=Math.round((innerHeight-VH)/2)+'px';
+    camera.aspect=VW/VH; applyShift(); composer.setSize(VW,VH);
+  }
+  window.__applyViewport=applyViewport; applyViewport();
   frame();
-  addEventListener('resize',()=>{renderer.setSize(innerWidth,innerHeight);camera.aspect=innerWidth/innerHeight;applyShift();composer.setSize(innerWidth,innerHeight);});
+  addEventListener('resize',applyViewport);
   window.__ready=true;
 }
 main();
