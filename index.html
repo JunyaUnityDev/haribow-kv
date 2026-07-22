@@ -235,8 +235,13 @@ async function main(){
   document.getElementById('load').style.opacity=0;
   const enterEl=document.getElementById('enter');
   const DBG=new URLSearchParams(location.search).get('t')!=null||new URLSearchParams(location.search).has('edit');
+  const AUTO=new URLSearchParams(location.search).has('auto');   // 埋め込み用: enter待ちせず自動再生
   if(DBG){document.getElementById('load').style.display='none';started=true;}
-  setTimeout(()=>{document.getElementById('load').style.display='none';if(!DBG)enterEl.style.display='flex';},900);
+  if(AUTO){document.getElementById('load').style.display='none';started=true;clock.start();
+    // iOSジャイロは初回タップで許可要求(任意)
+    addEventListener('pointerdown',async()=>{ if(typeof DeviceOrientationEvent!=='undefined'&&DeviceOrientationEvent.requestPermission){try{await DeviceOrientationEvent.requestPermission();}catch(e){}} },{once:true});
+  }
+  setTimeout(()=>{document.getElementById('load').style.display='none';if(!DBG&&!AUTO)enterEl.style.display='flex';},900);
   enterEl.addEventListener('pointerdown',async()=>{
     if(typeof DeviceOrientationEvent!=='undefined'&&DeviceOrientationEvent.requestPermission){
       try{await DeviceOrientationEvent.requestPermission();}catch(e){}
