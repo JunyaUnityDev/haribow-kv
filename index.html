@@ -519,19 +519,23 @@ async function main(){
         camZ=start+(hz-start)*sstep(t2/R1);
         camera.position.set(G.gcx+ptx*0.3, heroY0-pty*0.2, camZ);
       } else {
-        // idle: 各メンバーの顔を順に真ん中へ(ゆっくり・ループ)。中央(ヒーロー)を挟んで巡る
-        const faces=meta.members.map(m=>({x:m.Xc, y:m.Yc+m.Hc*0.36+(m.dy||0), z:hz-1.15}));
+        // idle: 顔を滑らかに巡る(Catmull-Romスプライン・止まらず流れる・後ろのメンバーほど寄る)
+        const minZ=Math.min.apply(null,meta.members.map(m=>m.Zm));
+        const faces=meta.members.map(m=>({x:m.Xc, y:m.Yc+m.Hc*0.36+(m.dy||0), z:-m.Zm+(2.0-(m.Zm-minZ)*1.35)}));  // 後ろ(Zm大)ほどgap小=近づく
         faces.sort((a,b)=>a.x-b.x);            // 左→右へ
-        const W=[{x:G.gcx,y:heroY0,z:hz}].concat(faces);   // 中央→各顔→(中央へ戻ってループ)
-        const n=W.length, seg=4.0, u=((t2-R1)%(n*seg))/seg, i=Math.floor(u), f=sstep(u-i);
-        const a=W[i%n], b=W[(i+1)%n];
-        camZ=a.z+(b.z-a.z)*f;
-        camera.position.set(a.x+(b.x-a.x)*f+ptx*0.3, a.y+(b.y-a.y)*f-pty*0.2, camZ);
+        const pts=[{x:G.gcx,y:heroY0,z:hz}].concat(faces);   // [0]=中央(引き終端に一致)→各顔→ループ
+        const n=pts.length, segDur=6.0, s=(t2-R1)/segDur;    // ゆっくり
+        const i=((Math.floor(s)%n)+n)%n, f=s-Math.floor(s);
+        const P=k=>pts[((i+k)%n+n)%n];
+        const p0=P(-1),p1=P(0),p2=P(1),p3=P(2);
+        const cr=(a,b,c,d)=>{const f2=f*f,f3=f2*f;return 0.5*((2*b)+(-a+c)*f+(2*a-5*b+4*c-d)*f2+(-a+3*b-3*c+d)*f3);};
+        camZ=cr(p0.z,p1.z,p2.z,p3.z);
+        camera.position.set(cr(p0.x,p1.x,p2.x,p3.x)+ptx*0.3, cr(p0.y,p1.y,p2.y,p3.y)-pty*0.2, camZ);
       }
       camera.rotation.set(0,0,0);              // 真っ直ぐ(lookAt無し)
     }
     applyShift();
-    const la=Math.min(1,Math.max(0,(t2-7.0)/0.6));   // logo appear @7s
+    const la=Math.min(1,Math.max(0,(t2-4.0)/0.6));   // logo appear @4s
     // ロゴをフレーム内上部へ自動配置+contain(幅と高さ両方に収める=全アスペクトで適正)
     { const Zl=L.z, dl=camZ+Zl, vH=vt*dl, vW=vt*Math.max(0.34,asp)*dl;
       const lw=Math.min(vW*0.82, vH*0.62/L.asp)*CF.logoScale, lsc=lw/L.wl; logo.scale.set(lsc,lsc,1);
