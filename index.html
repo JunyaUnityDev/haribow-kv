@@ -39,6 +39,7 @@ addEventListener('unhandledrejection',e=>errShow('REJ '+(e.reason&&e.reason.mess
 const CFG = { shiftY: 0.0, bloom:0.55, dust:1500, dur:20.0, revEnd:4.0 };
 let F=1600, W=1600, Hext=1589, CY=794;   // 実写背景(scene.jsonから上書き)
 let VW=innerWidth, VH=innerHeight, forceAspect=null;   // レンダ実寸(編集モードのアスペクト固定用)
+let camEdit={on:false, t:8, playing:false};            // カメラ動き編集(タイムライン)
 const dZ = dn => 2.0 + (1.0-dn)*7.0;
 
 const renderer = new THREE.WebGLRenderer({canvas:document.getElementById('c'), antialias:true});
@@ -288,6 +289,12 @@ async function main(){
       {k:'bloomThreshold',label:'ブルームしきい値',step:0.02,min:0,max:1}
     ];
     let fxi=0;
+    // カメラ動き(タイムライン)編集
+    const CFLDS=[{k:'x',label:'左右X',step:0.05},{k:'y',label:'上下Y',step:0.05},{k:'z',label:'前後Z(寄り)',step:0.1},{k:'ry',label:'左右回転',step:0.02},{k:'rx',label:'上下アオリ',step:0.02}];
+    let cfi=0;
+    const seedPath=()=>{ if(!meta.camPath||meta.camPath.length<2) meta.camPath=defaultCamPath(); };
+    const ensureKey=t=>{ seedPath(); const kf=meta.camPath; let k=kf.find(o=>Math.abs(o.t-t)<0.25); if(!k){ const s=sampleCamPath(kf,t); k={t:+(+t).toFixed(2),x:s.x,y:s.y,z:s.z,rx:s.rx||0,ry:s.ry||0}; kf.push(k); kf.sort((a,b)=>a.t-b.t);} return k; };
+    const delNearKey=t=>{ const kf=meta.camPath; if(!kf||kf.length<=2)return; let bi=0,bd=1e9; kf.forEach((o,i)=>{const d=Math.abs(o.t-t);if(d<bd){bd=d;bi=i;}}); kf.splice(bi,1); };
     const ASPS=[['Fill',null],['16:9',16/9],['16:10',16/10],['21:9',21/9],['4:3',4/3],['iPhone',390/844]];
     const _ap=new URLSearchParams(location.search).get('asp');   // ?asp=1.778 等で初期アスペクト指定(検証用)
     forceAspect=(_ap!=null&&_ap!=='')?(+_ap):390/844;           // 既定=iPhone(今の値がiPhone用)
@@ -321,20 +328,27 @@ async function main(){
         body='<div style="color:#7cf;margin:4px 0">ロゴ</div>'
           +'大きさ: '+meta.logoScale.toFixed(3)+' / 上下: '+meta.logoYoff.toFixed(3)+' / 左右: '+meta.logoX.toFixed(3)
           +'<div style="margin-top:5px;color:#bbb;font-size:11px">+/−=大きさ ↑↓=上下 ←→=左右</div>';
-      } else {
+      } else if(target==='fx'){
         body='<div style="margin:4px 0;display:flex;flex-wrap:wrap;gap:3px">'
           +FXP.map((p,i)=>btn(p.label,i===fxi,'data-fx="'+i+'"')).join('')+'</div>'
           +'選択: <span style="color:#7cf">'+FXP[fxi].label+'</span> = '+(+FX[FXP[fxi].k]).toFixed(FXP[fxi].int?0:3)
           +'<div style="margin-top:5px;color:#bbb;font-size:11px">↑↓=値 ←→=項目切替 / Shift=粗</div>';
+      } else {   // campath
+        seedPath(); const P=sampleCamPath(meta.camPath,camEdit.t);
+        body='<div style="color:#7cf;margin:4px 0">カメラ動き(タイムライン)</div>'
+          +'時間 <b>'+camEdit.t.toFixed(1)+'</b>/'+CFG.dur+'s '+(camEdit.playing?'▶再生':'⏸停止')+' / キー'+meta.camPath.length+'個<br>'
+          +'キー時刻: '+meta.camPath.map(k=>(+k.t).toFixed(1)).join(' , ')+'<br>'
+          +'項目 <span style="color:#fe7">'+CFLDS[cfi].label+'</span> ｜ 現在 x'+P.x.toFixed(2)+' y'+P.y.toFixed(2)+' z'+P.z.toFixed(2)+' 回'+(P.ry||0).toFixed(2)+'/'+(P.rx||0).toFixed(2)
+          +'<div style="margin-top:5px;color:#bbb;font-size:11px">, .=時間送り ｜ ←→=項目 ｜ ↑↓=値(自動でキー生成)<br>P=再生/停止 ｜ K=キー追加 ｜ X=近くのキー削除 ｜ Shift=粗</div>';
       }
       panel.innerHTML='<b>配置モード</b>'
-        +'<div style="margin:5px 0;display:flex;gap:3px;flex-wrap:wrap">'+btn('メンバー',target==='member','data-t="member"')+btn('カメラ',target==='camera','data-t="camera"')+btn('ロゴ',target==='logo','data-t="logo"')+btn('エフェクト',target==='fx','data-t="fx"')+'</div>'
+        +'<div style="margin:5px 0;display:flex;gap:3px;flex-wrap:wrap">'+btn('メンバー',target==='member','data-t="member"')+btn('カメラ',target==='camera','data-t="camera"')+btn('ロゴ',target==='logo','data-t="logo"')+btn('エフェクト',target==='fx','data-t="fx"')+btn('カメラ動き',target==='campath','data-t="campath"')+'</div>'
         +'<div style="margin:5px 0;display:flex;flex-wrap:wrap;gap:3px">アスペクト: '+ASPS.map(a=>btn(a[0]+(vmap[vkey(a[1])]?'●':''),forceAspect===a[1],'data-a="'+(a[1]==null?'':a[1])+'"')).join('')+'</div>'
         +body
         +'<div style="margin-top:6px;font-size:11px">Shift=大きく動く / ●=設定済 <b style="color:#fe7">E=Export</b></div>';
       panel.querySelectorAll('[data-mi]').forEach(b=>b.onclick=()=>{sel=+b.dataset.mi;draw();});
       panel.querySelectorAll('[data-fx]').forEach(b=>b.onclick=()=>{fxi=+b.dataset.fx;draw();});
-      panel.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{target=b.dataset.t;draw();});
+      panel.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{target=b.dataset.t;camEdit.on=(target==='campath');if(camEdit.on)seedPath();else camEdit.playing=false;draw();});
       panel.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{saveCur();forceAspect=b.dataset.a===''?null:+b.dataset.a;curAsp=forceAspect;loadAsp(curAsp);if(window.__applyViewport)window.__applyViewport();draw();});
     };
     const exportJSON=()=>{
@@ -342,6 +356,7 @@ async function main(){
       const fxo={}; FXP.forEach(p=>fxo[p.k]=p.int?Math.round(FX[p.k]):+(+FX[p.k]).toFixed(4));
       const out={
         fx:fxo,
+        camPath:(meta.camPath||[]).map(k=>({t:+(+k.t).toFixed(2),x:+(+k.x).toFixed(3),y:+(+k.y).toFixed(3),z:+(+k.z).toFixed(3),rx:+(+(k.rx||0)).toFixed(3),ry:+(+(k.ry||0)).toFixed(3)})),
         views:Object.values(vmap).map(v=>({aspect:v.aspect==null?null:+(+v.aspect).toFixed(4),fit:+v.fit.toFixed(4),camY:+v.camY.toFixed(4),logoScale:+v.logoScale.toFixed(4),logoYoff:+v.logoYoff.toFixed(4),logoX:+v.logoX.toFixed(4)})),
         members:meta.members.map(m=>({file:m.file,Xc:+m.Xc.toFixed(4),Yc:+m.Yc.toFixed(4),Zm:+m.Zm.toFixed(3),Wc:+m.Wc.toFixed(4),Hc:+m.Hc.toFixed(4),dy:+((m.dy||0)).toFixed(4),padFrac:m.padFrac||0,edgeWhite:+((m.edgeWhite||0)).toFixed(3)}))
       };
@@ -375,7 +390,7 @@ async function main(){
         else if(e.key==='ArrowLeft')meta.logoX-=s; else if(e.key==='ArrowRight')meta.logoX+=s;
         else if(e.key==='+'||e.key==='=')meta.logoScale*=1.02; else if(e.key==='-'||e.key==='_')meta.logoScale/=1.02;
         else hit=false;
-      } else {   // fx
+      } else if(target==='fx'){
         if(e.key==='ArrowLeft'){fxi=(fxi+FXP.length-1)%FXP.length;}
         else if(e.key==='ArrowRight'){fxi=(fxi+1)%FXP.length;}
         else if(e.key==='ArrowUp'||e.key==='ArrowDown'){
@@ -384,6 +399,20 @@ async function main(){
           FX[p.k]=v;
           if(p.rebuild==='smoke')buildSmoke(FX.smokeCount); else if(p.rebuild==='dust')buildDust(FX.particleCount);
         } else hit=false;
+      } else {   // campath カメラ動き
+        const ts=e.shiftKey?1.0:0.2;
+        if(e.key===','){camEdit.t=Math.max(0,camEdit.t-ts);}
+        else if(e.key==='.'){camEdit.t=Math.min(CFG.dur,camEdit.t+ts);}
+        else if(e.key==='ArrowLeft'){cfi=(cfi+CFLDS.length-1)%CFLDS.length;}
+        else if(e.key==='ArrowRight'){cfi=(cfi+1)%CFLDS.length;}
+        else if(e.key==='ArrowUp'||e.key==='ArrowDown'){
+          const fld=CFLDS[cfi], st=fld.step*(e.shiftKey?4:1)*(e.key==='ArrowUp'?1:-1);
+          const k=ensureKey(camEdit.t); k[fld.k]=(k[fld.k]||0)+st;
+        }
+        else if(e.key==='p'||e.key==='P'){camEdit.playing=!camEdit.playing;}
+        else if(e.key==='k'||e.key==='K'){ensureKey(camEdit.t);}
+        else if(e.key==='x'||e.key==='X'||e.key==='Backspace'){delNearKey(camEdit.t);}
+        else hit=false;
       }
       if(hit){e.preventDefault();draw();}
     });
@@ -405,9 +434,21 @@ async function main(){
     for(let i=0;i<vs.length-1;i++){ if(asp>=vs[i].aspect && asp<=vs[i+1].aspect){ const t=(asp-vs[i].aspect)/(vs[i+1].aspect-vs[i].aspect); return _lerp(vs[i],vs[i+1],t); } }
     return vs[0];
   }
+  // カメラのキーフレーム補間(共有パス・座標はヒーロー基準のオフセット x/y/z + 回転 rx/ry)
+  const _lp=(a,b,u)=>a+(b-a)*u;
+  function sampleCamPath(kf,t){
+    if(!kf||!kf.length) return {x:0,y:0,z:0,rx:0,ry:0};
+    if(t<=kf[0].t) return kf[0];
+    if(t>=kf[kf.length-1].t) return kf[kf.length-1];
+    for(let i=0;i<kf.length-1;i++){ if(t>=kf[i].t&&t<=kf[i+1].t){ const u=sstep((t-kf[i].t)/(kf[i+1].t-kf[i].t||1)),a=kf[i],b=kf[i+1];
+      return {x:_lp(a.x,b.x,u),y:_lp(a.y,b.y,u),z:_lp(a.z,b.z,u),rx:_lp(a.rx||0,b.rx||0,u),ry:_lp(a.ry||0,b.ry||0,u)}; } }
+    return kf[0];
+  }
+  const defaultCamPath=()=>[{t:0,x:0,y:0,z:-2.0,rx:0,ry:0},{t:4,x:0,y:0,z:0,rx:0,ry:0},{t:CFG.dur,x:0,y:0,z:0.25,rx:0,ry:0}];
   function frame(){
     const raw = FREEZE!=null?parseFloat(FREEZE):(started?clock.getElapsedTime():0);
-    const el=EDIT?CFG.dur:(raw%CFG.dur), t2=el;
+    if(EDIT&&camEdit.on&&camEdit.playing){ camEdit.t+=1/60; if(camEdit.t>CFG.dur)camEdit.t=0; }
+    const el=EDIT?(camEdit.on?camEdit.t:CFG.dur):(raw%CFG.dur), t2=el;
     // camera reveal (ヒーロー位置=アスペクトで自動フィット: 縦画面ほど引いて全員入れる)
     // グループを必ず余白付きで収めるフィットカメラ(どのアスペクトでも見切れ無し)
     const asp=VW/VH;
@@ -419,17 +460,25 @@ async function main(){
     const D=Math.max(Dw,Dh,0.6);
     const hz=-G.gcz+D;                       // ヒーロー位置(寄せて迫力)
     const start=-(G.gcz+0.4);                 // メンバーの背後(片面カリングで無人)
-    let z; if(t2<=CFG.revEnd) z=start+(hz-start)*sstep(t2/CFG.revEnd); else z=hz-0.25*eout((t2-CFG.revEnd)/(CFG.dur-CFG.revEnd));
     ptx+=(tx-ptx)*0.06; pty+=(ty-pty)*0.06;
-    // 回り込み無し=真っ直ぐ-Z(板が見えない)。突き抜け中だけ小さく横スイング(収束)
-    const rp=Math.min(1,t2/CFG.revEnd), wa=(1-rp)*(1-rp);
-    const wx=Math.sin(rp*Math.PI*2.0)*0.8*wa;
-    camera.position.set(G.gcx+wx+ptx*0.3, G.gcy+CF.camY-pty*0.2, z);
-    camera.rotation.set(0,0,0);              // 真っ直ぐ(lookAt無し)
+    const heroY0=G.gcy+CF.camY;
+    const usePath=(EDIT&&camEdit.on&&meta.camPath)||(!EDIT&&meta.camPath&&meta.camPath.length>=2);
+    let camZ;
+    if(usePath){
+      const P=sampleCamPath(meta.camPath,t2); camZ=hz+P.z;   // ヒーロー(gcx,heroY0,hz)基準のオフセット+回転
+      camera.position.set(G.gcx+P.x+ptx*0.3, heroY0+P.y-pty*0.2, camZ);
+      camera.rotation.set(P.rx||0, P.ry||0, 0);
+    } else {
+      if(t2<=CFG.revEnd) camZ=start+(hz-start)*sstep(t2/CFG.revEnd); else camZ=hz-0.25*eout((t2-CFG.revEnd)/(CFG.dur-CFG.revEnd));
+      const rp=Math.min(1,t2/CFG.revEnd), wa=(1-rp)*(1-rp);
+      const wx=Math.sin(rp*Math.PI*2.0)*0.8*wa;   // 突き抜け中だけ横スイング
+      camera.position.set(G.gcx+wx+ptx*0.3, heroY0-pty*0.2, camZ);
+      camera.rotation.set(0,0,0);              // 真っ直ぐ(lookAt無し)
+    }
     applyShift();
     const la=Math.min(1,Math.max(0,(t2-7.0)/0.6));   // logo appear @7s
     // ロゴをフレーム内上部へ自動配置+contain(幅と高さ両方に収める=全アスペクトで適正)
-    { const Zl=L.z, dl=z+Zl, vH=vt*dl, vW=vt*Math.max(0.34,asp)*dl;
+    { const Zl=L.z, dl=camZ+Zl, vH=vt*dl, vW=vt*Math.max(0.34,asp)*dl;
       const lw=Math.min(vW*0.82, vH*0.62/L.asp)*CF.logoScale, lsc=lw/L.wl; logo.scale.set(lsc,lsc,1);
       const lH=L.wl*L.asp*lsc;
       logo.position.set(G.gcx+CF.logoX*vW, (G.gcy+CF.camY)+vH-lH/2-vH*0.05+CF.logoYoff*vH, -Zl);
