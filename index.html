@@ -39,7 +39,7 @@ addEventListener('unhandledrejection',e=>errShow('REJ '+(e.reason&&e.reason.mess
 const CFG = { shiftY: 0.0, bloom:0.55, dust:1500, dur:20.0, revEnd:4.0 };
 let F=1600, W=1600, Hext=1589, CY=794;   // 実写背景(scene.jsonから上書き)
 let VW=innerWidth, VH=innerHeight, forceAspect=null;   // レンダ実寸(編集モードのアスペクト固定用)
-let camEdit={on:false, t:8, playing:false};            // カメラ動き編集(タイムライン)
+let camEdit={on:false, t:8, playing:false}, _fc=0;     // カメラ動き編集(タイムライン)
 const dZ = dn => 2.0 + (1.0-dn)*7.0;
 
 const renderer = new THREE.WebGLRenderer({canvas:document.getElementById('c'), antialias:true});
@@ -290,10 +290,10 @@ async function main(){
     ];
     let fxi=0;
     // カメラ動き(タイムライン)編集
-    const CFLDS=[{k:'x',label:'左右X',step:0.05},{k:'y',label:'上下Y',step:0.05},{k:'z',label:'前後Z(寄り)',step:0.1},{k:'ry',label:'左右回転',step:0.02},{k:'rx',label:'上下アオリ',step:0.02}];
+    const CFLDS=[{k:'x',label:'左右X',step:0.05},{k:'y',label:'上下Y',step:0.05},{k:'z',label:'前後Z(寄り)',step:0.08},{k:'hero',label:'画面フィット',step:0.05},{k:'ry',label:'左右回転',step:0.02},{k:'rx',label:'上下アオリ',step:0.02}];
     let cfi=0;
     const seedPath=()=>{ if(!meta.camPath||meta.camPath.length<2) meta.camPath=defaultCamPath(); };
-    const ensureKey=t=>{ seedPath(); const kf=meta.camPath; let k=kf.find(o=>Math.abs(o.t-t)<0.25); if(!k){ const s=sampleCamPath(kf,t); k={t:+(+t).toFixed(2),x:s.x,y:s.y,z:s.z,rx:s.rx||0,ry:s.ry||0}; kf.push(k); kf.sort((a,b)=>a.t-b.t);} return k; };
+    const ensureKey=t=>{ seedPath(); const kf=meta.camPath; let k=kf.find(o=>Math.abs(o.t-t)<0.25); if(!k){ const s=sampleCamPath(kf,t); k={t:+(+t).toFixed(2),x:s.x,y:s.y,z:s.z,hero:s.hero==null?1:s.hero,rx:s.rx||0,ry:s.ry||0}; kf.push(k); kf.sort((a,b)=>a.t-b.t);} return k; };
     const delNearKey=t=>{ const kf=meta.camPath; if(!kf||kf.length<=2)return; let bi=0,bd=1e9; kf.forEach((o,i)=>{const d=Math.abs(o.t-t);if(d<bd){bd=d;bi=i;}}); kf.splice(bi,1); };
     const ASPS=[['Fill',null],['16:9',16/9],['16:10',16/10],['21:9',21/9],['4:3',4/3],['iPhone',390/844]];
     const _ap=new URLSearchParams(location.search).get('asp');   // ?asp=1.778 等で初期アスペクト指定(検証用)
@@ -335,11 +335,9 @@ async function main(){
           +'<div style="margin-top:5px;color:#bbb;font-size:11px">↑↓=値 ←→=項目切替 / Shift=粗</div>';
       } else {   // campath
         seedPath(); const P=sampleCamPath(meta.camPath,camEdit.t);
-        body='<div style="color:#7cf;margin:4px 0">カメラ動き(タイムライン)</div>'
-          +'時間 <b>'+camEdit.t.toFixed(1)+'</b>/'+CFG.dur+'s '+(camEdit.playing?'▶再生':'⏸停止')+' / キー'+meta.camPath.length+'個<br>'
-          +'キー時刻: '+meta.camPath.map(k=>(+k.t).toFixed(1)).join(' , ')+'<br>'
-          +'項目 <span style="color:#fe7">'+CFLDS[cfi].label+'</span> ｜ 現在 x'+P.x.toFixed(2)+' y'+P.y.toFixed(2)+' z'+P.z.toFixed(2)+' 回'+(P.ry||0).toFixed(2)+'/'+(P.rx||0).toFixed(2)
-          +'<div style="margin-top:5px;color:#bbb;font-size:11px">, .=時間送り ｜ ←→=項目 ｜ ↑↓=値(自動でキー生成)<br>P=再生/停止 ｜ K=キー追加 ｜ X=近くのキー削除 ｜ Shift=粗</div>';
+        body='<div style="color:#7cf;margin:4px 0">カメラ動き（下の長いバーで操作）</div>'
+          +'項目 <span style="color:#fe7">'+CFLDS[cfi].label+'</span> ｜ 現在 x'+P.x.toFixed(2)+' y'+P.y.toFixed(2)+' z'+P.z.toFixed(2)+' fit'+(P.hero==null?1:P.hero).toFixed(2)+' 回'+(P.ry||0).toFixed(2)+'/'+(P.rx||0).toFixed(2)
+          +'<div style="margin-top:5px;color:#bbb;font-size:11px">バー=クリックでスクラブ/点をドラッグで移動<br>, .=時間送り ｜ ←→=項目 ｜ ↑↓=値(自動キー生成)<br>P=再生/停止 ｜ K=キー追加 ｜ X=キー削除 ｜ Shift=粗</div>';
       }
       panel.innerHTML='<b>配置モード</b>'
         +'<div style="margin:5px 0;display:flex;gap:3px;flex-wrap:wrap">'+btn('メンバー',target==='member','data-t="member"')+btn('カメラ',target==='camera','data-t="camera"')+btn('ロゴ',target==='logo','data-t="logo"')+btn('エフェクト',target==='fx','data-t="fx"')+btn('カメラ動き',target==='campath','data-t="campath"')+'</div>'
@@ -350,13 +348,43 @@ async function main(){
       panel.querySelectorAll('[data-fx]').forEach(b=>b.onclick=()=>{fxi=+b.dataset.fx;draw();});
       panel.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{target=b.dataset.t;camEdit.on=(target==='campath');if(camEdit.on)seedPath();else camEdit.playing=false;draw();});
       panel.querySelectorAll('[data-a]').forEach(b=>b.onclick=()=>{saveCur();forceAspect=b.dataset.a===''?null:+b.dataset.a;curAsp=forceAspect;loadAsp(curAsp);if(window.__applyViewport)window.__applyViewport();draw();});
+      drawTimeline();
     };
+    // ---- タイムラインバー(長い横バー・クリックでスクラブ・キーフレーム点をドラッグで移動) ----
+    const tlBar=document.createElement('div');
+    tlBar.style.cssText='position:fixed;left:2%;right:2%;bottom:14px;height:54px;z-index:9999;background:rgba(0,0,0,.82);border-radius:10px;display:none;padding:8px 16px;box-sizing:border-box;user-select:none;font:11px -apple-system,sans-serif;color:#fff';
+    document.body.appendChild(tlBar);
+    const drawTimeline=()=>{
+      if(target!=='campath'){tlBar.style.display='none';return;}
+      seedPath(); const kf=meta.camPath; tlBar.style.display='block';
+      tlBar.innerHTML='<div style="position:absolute;top:5px;left:16px;color:#7cf">カメラ動き ｜ <b>'+camEdit.t.toFixed(1)+'</b>/'+CFG.dur+'s '+(camEdit.playing?'▶再生':'⏸停止')+' ｜ 項目 <span style="color:#fe7">'+CFLDS[cfi].label+'</span></div>'
+        +'<div id="tlt" style="position:absolute;left:16px;right:16px;top:60%;height:6px;background:#3a3f4a;border-radius:3px;transform:translateY(-50%);cursor:pointer"></div>'
+        +'<div id="tlfill" style="position:absolute;top:60%;height:6px;background:#2b6a4a;border-radius:3px;transform:translateY(-50%);width:0;pointer-events:none"></div>'
+        +kf.map((k,i)=>'<div class="tlk" data-i="'+i+'" style="position:absolute;top:60%;width:15px;height:15px;margin:-7.5px 0 0 -7.5px;border-radius:50%;background:#3a7;border:2px solid #fff;cursor:grab" title="'+(+k.t).toFixed(2)+'s"></div>').join('')
+        +'<div id="tlhead" style="position:absolute;top:calc(60% - 13px);width:2px;height:26px;background:#fe7;pointer-events:none"></div>'
+        +'<div style="position:absolute;bottom:2px;left:16px;color:#889">0s</div><div style="position:absolute;bottom:2px;right:16px;color:#889">'+CFG.dur+'s</div>';
+      const track=tlBar.querySelector('#tlt'), tr=()=>track.getBoundingClientRect(), barL=()=>tlBar.getBoundingClientRect().left;
+      const place=()=>{ const r=tr(),bl=barL();
+        tlBar.querySelectorAll('.tlk').forEach(d=>{d.style.left=(r.left-bl+r.width*(kf[+d.dataset.i].t/CFG.dur))+'px';});
+        tlBar.querySelector('#tlhead').style.left=(r.left-bl+r.width*(camEdit.t/CFG.dur))+'px';
+        tlBar.querySelector('#tlfill').style.left=(r.left-bl)+'px'; tlBar.querySelector('#tlfill').style.width=(r.width*(camEdit.t/CFG.dur))+'px'; };
+      place();
+      track.onclick=(ev)=>{const r=tr(); camEdit.t=Math.max(0,Math.min(CFG.dur,((ev.clientX-r.left)/r.width)*CFG.dur)); draw();};
+      tlBar.querySelectorAll('.tlk').forEach(d=>{
+        d.onclick=(ev)=>{ev.stopPropagation(); camEdit.t=kf[+d.dataset.i].t; draw();};
+        d.onpointerdown=(ev)=>{ev.stopPropagation();ev.preventDefault(); const i=+d.dataset.i; d.style.cursor='grabbing';
+          const move=(e2)=>{const r=tr(); let t=Math.max(0,Math.min(CFG.dur,((e2.clientX-r.left)/r.width)*CFG.dur)); kf[i].t=+t.toFixed(2); camEdit.t=kf[i].t; place();};
+          const up=()=>{document.removeEventListener('pointermove',move);document.removeEventListener('pointerup',up); kf.sort((a,b)=>a.t-b.t); draw();};
+          document.addEventListener('pointermove',move); document.addEventListener('pointerup',up);};
+      });
+    };
+    window.__editDraw=draw;
     const exportJSON=()=>{
       saveCur();
       const fxo={}; FXP.forEach(p=>fxo[p.k]=p.int?Math.round(FX[p.k]):+(+FX[p.k]).toFixed(4));
       const out={
         fx:fxo,
-        camPath:(meta.camPath||[]).map(k=>({t:+(+k.t).toFixed(2),x:+(+k.x).toFixed(3),y:+(+k.y).toFixed(3),z:+(+k.z).toFixed(3),rx:+(+(k.rx||0)).toFixed(3),ry:+(+(k.ry||0)).toFixed(3)})),
+        camPath:(meta.camPath||[]).map(k=>({t:+(+k.t).toFixed(2),x:+(+k.x).toFixed(3),y:+(+k.y).toFixed(3),z:+(+k.z).toFixed(3),hero:+(+(k.hero==null?1:k.hero)).toFixed(3),rx:+(+(k.rx||0)).toFixed(3),ry:+(+(k.ry||0)).toFixed(3)})),
         views:Object.values(vmap).map(v=>({aspect:v.aspect==null?null:+(+v.aspect).toFixed(4),fit:+v.fit.toFixed(4),camY:+v.camY.toFixed(4),logoScale:+v.logoScale.toFixed(4),logoYoff:+v.logoYoff.toFixed(4),logoX:+v.logoX.toFixed(4)})),
         members:meta.members.map(m=>({file:m.file,Xc:+m.Xc.toFixed(4),Yc:+m.Yc.toFixed(4),Zm:+m.Zm.toFixed(3),Wc:+m.Wc.toFixed(4),Hc:+m.Hc.toFixed(4),dy:+((m.dy||0)).toFixed(4),padFrac:m.padFrac||0,edgeWhite:+((m.edgeWhite||0)).toFixed(3)}))
       };
@@ -434,20 +462,30 @@ async function main(){
     for(let i=0;i<vs.length-1;i++){ if(asp>=vs[i].aspect && asp<=vs[i+1].aspect){ const t=(asp-vs[i].aspect)/(vs[i+1].aspect-vs[i].aspect); return _lerp(vs[i],vs[i+1],t); } }
     return vs[0];
   }
-  // カメラのキーフレーム補間(共有パス・座標はヒーロー基準のオフセット x/y/z + 回転 rx/ry)
+  // カメラのキーフレーム補間(共有パス)。x,y=ヒーロー中心基準オフセット / z=グループ面(-gcz)基準 / hero=自動フィット追従(0..1) / rx,ry=回転
   const _lp=(a,b,u)=>a+(b-a)*u;
   function sampleCamPath(kf,t){
-    if(!kf||!kf.length) return {x:0,y:0,z:0,rx:0,ry:0};
+    if(!kf||!kf.length) return {x:0,y:0,z:0,hero:1,rx:0,ry:0};
     if(t<=kf[0].t) return kf[0];
     if(t>=kf[kf.length-1].t) return kf[kf.length-1];
     for(let i=0;i<kf.length-1;i++){ if(t>=kf[i].t&&t<=kf[i+1].t){ const u=sstep((t-kf[i].t)/(kf[i+1].t-kf[i].t||1)),a=kf[i],b=kf[i+1];
-      return {x:_lp(a.x,b.x,u),y:_lp(a.y,b.y,u),z:_lp(a.z,b.z,u),rx:_lp(a.rx||0,b.rx||0,u),ry:_lp(a.ry||0,b.ry||0,u)}; } }
+      return {x:_lp(a.x,b.x,u),y:_lp(a.y,b.y,u),z:_lp(a.z,b.z,u),hero:_lp(a.hero==null?1:a.hero,b.hero==null?1:b.hero,u),rx:_lp(a.rx||0,b.rx||0,u),ry:_lp(a.ry||0,b.ry||0,u)}; } }
     return kf[0];
   }
-  const defaultCamPath=()=>[{t:0,x:0,y:0,z:-2.0,rx:0,ry:0},{t:4,x:0,y:0,z:0,rx:0,ry:0},{t:CFG.dur,x:0,y:0,z:0.25,rx:0,ry:0}];
+  // 現本編の動き(背後→smootherstepでヒーロー→微速寄り+突入時スイング)を正確に再現したデフォルト
+  const defaultCamPath=()=>[
+    {t:0,x:0,   y:0,z:-0.400,hero:0.000,rx:0,ry:0},
+    {t:1,x:0.45,y:0,z:-0.359,hero:0.104,rx:0,ry:0},
+    {t:2,x:0,   y:0,z:-0.200,hero:0.500,rx:0,ry:0},
+    {t:3,x:-0.05,y:0,z:-0.041,hero:0.896,rx:0,ry:0},
+    {t:4,x:0,   y:0,z:0.000, hero:1.000,rx:0,ry:0},
+    {t:6,x:0,   y:0,z:-0.083,hero:1.000,rx:0,ry:0},   // 微速寄り(eout)をサンプル
+    {t:8,x:0,   y:0,z:-0.145,hero:1.000,rx:0,ry:0},
+    {t:12,x:0,  y:0,z:-0.219,hero:1.000,rx:0,ry:0},
+    {t:CFG.dur,x:0,y:0,z:-0.250,hero:1.000,rx:0,ry:0}];
   function frame(){
     const raw = FREEZE!=null?parseFloat(FREEZE):(started?clock.getElapsedTime():0);
-    if(EDIT&&camEdit.on&&camEdit.playing){ camEdit.t+=1/60; if(camEdit.t>CFG.dur)camEdit.t=0; }
+    if(EDIT&&camEdit.on&&camEdit.playing){ camEdit.t+=1/60; if(camEdit.t>CFG.dur)camEdit.t=0; if((_fc=(_fc+1)%6)===0&&window.__editDraw)window.__editDraw(); }
     const el=EDIT?(camEdit.on?camEdit.t:CFG.dur):(raw%CFG.dur), t2=el;
     // camera reveal (ヒーロー位置=アスペクトで自動フィット: 縦画面ほど引いて全員入れる)
     // グループを必ず余白付きで収めるフィットカメラ(どのアスペクトでも見切れ無し)
@@ -465,7 +503,8 @@ async function main(){
     const usePath=(EDIT&&camEdit.on&&meta.camPath)||(!EDIT&&meta.camPath&&meta.camPath.length>=2);
     let camZ;
     if(usePath){
-      const P=sampleCamPath(meta.camPath,t2); camZ=hz+P.z;   // ヒーロー(gcx,heroY0,hz)基準のオフセット+回転
+      const P=sampleCamPath(meta.camPath,t2);
+      camZ=-G.gcz+P.z+(P.hero==null?1:P.hero)*D;   // z=グループ面基準 + hero*D で終点は各画面フィット
       camera.position.set(G.gcx+P.x+ptx*0.3, heroY0+P.y-pty*0.2, camZ);
       camera.rotation.set(P.rx||0, P.ry||0, 0);
     } else {
