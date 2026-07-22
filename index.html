@@ -153,7 +153,16 @@ async function main(){
   // ---- members (整合配置=Hで拡大背景に合わせた3D座標に直接配置) ----
   // ふちぼかし(feather)+切り取り(cutout)をシェーダで制御。halo=白リム発光
   const MEM_VERT='varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}';
-  const MEM_FRAG='uniform sampler2D map;uniform float cutout,feather,opacity;varying vec2 vUv;void main(){vec4 t=texture2D(map,vUv);float a=smoothstep(cutout-feather,cutout+feather,t.a);if(a<0.004)discard;gl_FragColor=vec4(t.rgb,a*opacity);}';
+  // ふち白トリム: 境界(近くに透明)かつ白っぽい画素のアルファを削る(edgeWhite=人ごとの強さ)
+  const MEM_FRAG='uniform sampler2D map;uniform float cutout,feather,opacity,edgeWhite;uniform vec2 texel;varying vec2 vUv;'
+    +'void main(){vec4 t=texture2D(map,vUv);float a=smoothstep(cutout-feather,cutout+feather,t.a);if(a<0.004)discard;'
+    +'if(edgeWhite>0.001){vec2 o=texel*2.2;'
+    +'float amin=min(min(min(texture2D(map,vUv+vec2(o.x,0.)).a,texture2D(map,vUv+vec2(-o.x,0.)).a),min(texture2D(map,vUv+vec2(0.,o.y)).a,texture2D(map,vUv+vec2(0.,-o.y)).a)),'
+    +'min(min(texture2D(map,vUv+o).a,texture2D(map,vUv-o).a),min(texture2D(map,vUv+vec2(o.x,-o.y)).a,texture2D(map,vUv+vec2(-o.x,o.y)).a)));'
+    +'float edge=1.0-smoothstep(cutout-0.05,cutout+0.05,amin);'          // 境界=近傍に透明あり
+    +'float wht=smoothstep(0.5,0.88,min(t.r,min(t.g,t.b)));'             // 白っぽさ
+    +'a*=1.0-edge*wht*edgeWhite;}'
+    +'if(a<0.004)discard;gl_FragColor=vec4(t.rgb,a*opacity);}';
   // ハロー: 外側に太くにじむ白光→Bloomが拾って発光に見える
   const HALO_FRAG='uniform sampler2D map;uniform float cutout,feather,opacity;varying vec2 vUv;void main(){vec4 t=texture2D(map,vUv);float a=smoothstep(cutout-feather*6.0,cutout+feather*6.0,t.a);gl_FragColor=vec4(vec3(1.6,1.5,1.25),a*opacity);}';
   // 落ち影: 黒シルエットをブラー(複数サンプル)して床に落とす
@@ -181,7 +190,8 @@ async function main(){
     // リムハロー(メンバーの外側ににじむ光→本体が上に描かれ縁だけ発光)
     const hmat=new THREE.ShaderMaterial({uniforms:{map:{value:t},cutout:{value:FX.memberCutout},feather:{value:FX.memberFeather},opacity:{value:FX.memberHalo}},vertexShader:MEM_VERT,fragmentShader:HALO_FRAG,transparent:true,depthWrite:false,depthTest:true,blending:THREE.AdditiveBlending});
     const halo=new THREE.Mesh(new THREE.PlaneGeometry(1,1),hmat); halo.renderOrder=0.9; scene.add(halo);
-    const mat=new THREE.ShaderMaterial({uniforms:{map:{value:t},cutout:{value:FX.memberCutout},feather:{value:FX.memberFeather},opacity:{value:1}},vertexShader:MEM_VERT,fragmentShader:MEM_FRAG,transparent:true,depthWrite:false,depthTest:true});
+    const tw=(t.image&&t.image.width)||1024, th=(t.image&&t.image.height)||1024;
+    const mat=new THREE.ShaderMaterial({uniforms:{map:{value:t},cutout:{value:FX.memberCutout},feather:{value:FX.memberFeather},opacity:{value:1},edgeWhite:{value:m.edgeWhite||0},texel:{value:new THREE.Vector2(1/tw,1/th)}},vertexShader:MEM_VERT,fragmentShader:MEM_FRAG,transparent:true,depthWrite:false,depthTest:true});
     const mesh=new THREE.Mesh(new THREE.PlaneGeometry(1,1),mat); mesh.renderOrder=1; scene.add(mesh);
     const o={m,mesh,sh,halo,mat,hmat,shp,spmat}; memObjs.push(o); applyMember(o);
   }
@@ -298,7 +308,8 @@ async function main(){
           +memObjs.map((oo,i)=>btn(NAMES[key(oo)],i===sel,'data-mi="'+i+'"')).join('')+'</div>'
           +'選択: <span style="color:#7cf">'+NAMES[key(o)]+'('+key(o)+')</span><br>'
           +'dy(上下): '+(m.dy||0).toFixed(4)+' / X(左右): '+m.Xc.toFixed(3)+' / 大きさ: '+m.Wc.toFixed(3)
-          +'<div style="margin-top:5px;color:#bbb;font-size:11px">↑↓=上下 ←→=左右 +/−=大きさ / 0〜7=人選択</div>';
+          +'<br>ふち白トリム: <span style="color:#fe7">'+(m.edgeWhite||0).toFixed(2)+'</span>'
+          +'<div style="margin-top:5px;color:#bbb;font-size:11px">↑↓=上下 ←→=左右 +/−=大きさ<br>[ ]=ふちの白を削る / 0〜7=人選択</div>';
       } else if(target==='camera'){
         body='<div style="color:#7cf;margin:4px 0">カメラ最終位置</div>'
           +'引き(fit): '+meta.fit.toFixed(3)+' / 上下(camY): '+meta.camY.toFixed(3)
@@ -329,7 +340,7 @@ async function main(){
       const out={
         fx:fxo,
         views:Object.values(vmap).map(v=>({aspect:v.aspect==null?null:+(+v.aspect).toFixed(4),fit:+v.fit.toFixed(4),camY:+v.camY.toFixed(4),logoScale:+v.logoScale.toFixed(4),logoYoff:+v.logoYoff.toFixed(4),logoX:+v.logoX.toFixed(4)})),
-        members:meta.members.map(m=>({file:m.file,Xc:+m.Xc.toFixed(4),Yc:+m.Yc.toFixed(4),Zm:+m.Zm.toFixed(3),Wc:+m.Wc.toFixed(4),Hc:+m.Hc.toFixed(4),dy:+((m.dy||0)).toFixed(4),padFrac:m.padFrac||0}))
+        members:meta.members.map(m=>({file:m.file,Xc:+m.Xc.toFixed(4),Yc:+m.Yc.toFixed(4),Zm:+m.Zm.toFixed(3),Wc:+m.Wc.toFixed(4),Hc:+m.Hc.toFixed(4),dy:+((m.dy||0)).toFixed(4),padFrac:m.padFrac||0,edgeWhite:+((m.edgeWhite||0)).toFixed(3)}))
       };
       const blob=new Blob([JSON.stringify(out,null,2)],{type:'application/json'});
       const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='kv_edited.json'; a.click();
@@ -344,6 +355,8 @@ async function main(){
         if(e.key==='ArrowUp')m.dy=(m.dy||0)+s; else if(e.key==='ArrowDown')m.dy=(m.dy||0)-s;
         else if(e.key==='ArrowLeft')m.Xc-=s; else if(e.key==='ArrowRight')m.Xc+=s;
         else if(e.key==='+'||e.key==='='){m.Wc*=1.015;m.Hc*=1.015;} else if(e.key==='-'||e.key==='_'){m.Wc/=1.015;m.Hc/=1.015;}
+        else if(e.key===']')m.edgeWhite=Math.min(1,(m.edgeWhite||0)+(e.shiftKey?0.1:0.03));
+        else if(e.key==='[')m.edgeWhite=Math.max(0,(m.edgeWhite||0)-(e.shiftKey?0.1:0.03));
         else hit=false;
         if(hit)applyMember(o);
       } else if(target==='camera'){
@@ -433,7 +446,7 @@ async function main(){
     }
     const sl=FX.shadowLength;
     for(const o of memObjs){                             // メンバー: ふちぼかし/切り取り/ハロー
-      o.mat.uniforms.cutout.value=FX.memberCutout; o.mat.uniforms.feather.value=FX.memberFeather;
+      o.mat.uniforms.cutout.value=FX.memberCutout; o.mat.uniforms.feather.value=FX.memberFeather; o.mat.uniforms.edgeWhite.value=o.m.edgeWhite||0;
       o.hmat.uniforms.cutout.value=FX.memberCutout; o.hmat.uniforms.feather.value=FX.memberFeather; o.hmat.uniforms.opacity.value=FX.memberHalo;
       o.spmat.uniforms.cutout.value=FX.memberCutout; o.spmat.uniforms.darkness.value=FX.shadowDarkness; o.spmat.uniforms.blur.value=FX.shadowBlur;
       o.shp.scale.set(1,sl,1); o.shp.position.set(o.m.Xc, o.footY, -o.m.Zm+o.m.Hc*sl/2);   // 足元→カメラ側へ伸ばす
