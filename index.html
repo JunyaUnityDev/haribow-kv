@@ -153,15 +153,18 @@ async function main(){
   // ---- members (整合配置=Hで拡大背景に合わせた3D座標に直接配置) ----
   // ふちぼかし(feather)+切り取り(cutout)をシェーダで制御。halo=白リム発光
   const MEM_VERT='varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}';
-  // ふち白トリム: 境界(近くに透明)かつ白っぽい画素のアルファを削る(edgeWhite=人ごとの強さ)
+  // ふち白トリム: edgeWhite=削る半径(px相当)。その半径内に透明があり かつ 白い画素をゴッソリ削る
   const MEM_FRAG='uniform sampler2D map;uniform float cutout,feather,opacity,edgeWhite;uniform vec2 texel;varying vec2 vUv;'
+    +'float sa(vec2 d){return texture2D(map,vUv+d*texel).a;}'
     +'void main(){vec4 t=texture2D(map,vUv);float a=smoothstep(cutout-feather,cutout+feather,t.a);if(a<0.004)discard;'
-    +'if(edgeWhite>0.001){vec2 o=texel*2.2;'
-    +'float amin=min(min(min(texture2D(map,vUv+vec2(o.x,0.)).a,texture2D(map,vUv+vec2(-o.x,0.)).a),min(texture2D(map,vUv+vec2(0.,o.y)).a,texture2D(map,vUv+vec2(0.,-o.y)).a)),'
-    +'min(min(texture2D(map,vUv+o).a,texture2D(map,vUv-o).a),min(texture2D(map,vUv+vec2(o.x,-o.y)).a,texture2D(map,vUv+vec2(-o.x,o.y)).a)));'
-    +'float edge=1.0-smoothstep(cutout-0.05,cutout+0.05,amin);'          // 境界=近傍に透明あり
-    +'float wht=smoothstep(0.5,0.88,min(t.r,min(t.g,t.b)));'             // 白っぽさ
-    +'a*=1.0-edge*wht*edgeWhite;}'
+    +'if(edgeWhite>0.001){float r1=edgeWhite*0.5,r2=edgeWhite,d=0.7071;float amin=1.0;'
+    +'amin=min(amin,sa(vec2(r1,0.)));amin=min(amin,sa(vec2(-r1,0.)));amin=min(amin,sa(vec2(0.,r1)));amin=min(amin,sa(vec2(0.,-r1)));'
+    +'amin=min(amin,sa(vec2(r1,r1)*d));amin=min(amin,sa(vec2(-r1,-r1)*d));amin=min(amin,sa(vec2(r1,-r1)*d));amin=min(amin,sa(vec2(-r1,r1)*d));'
+    +'amin=min(amin,sa(vec2(r2,0.)));amin=min(amin,sa(vec2(-r2,0.)));amin=min(amin,sa(vec2(0.,r2)));amin=min(amin,sa(vec2(0.,-r2)));'
+    +'amin=min(amin,sa(vec2(r2,r2)*d));amin=min(amin,sa(vec2(-r2,-r2)*d));amin=min(amin,sa(vec2(r2,-r2)*d));amin=min(amin,sa(vec2(-r2,r2)*d));'
+    +'float edge=1.0-smoothstep(cutout-0.05,cutout+0.05,amin);'          // 半径内に透明=境界帯
+    +'float wht=smoothstep(0.22,0.6,min(t.r,min(t.g,t.b)));'             // 白/明るい灰も対象(緩め)
+    +'a*=1.0-edge*wht;}'                                                 // 帯内の明るい縁を全削り
     +'if(a<0.004)discard;gl_FragColor=vec4(t.rgb,a*opacity);}';
   // ハロー: 外側に太くにじむ白光→Bloomが拾って発光に見える
   const HALO_FRAG='uniform sampler2D map;uniform float cutout,feather,opacity;varying vec2 vUv;void main(){vec4 t=texture2D(map,vUv);float a=smoothstep(cutout-feather*6.0,cutout+feather*6.0,t.a);gl_FragColor=vec4(vec3(1.6,1.5,1.25),a*opacity);}';
@@ -355,8 +358,8 @@ async function main(){
         if(e.key==='ArrowUp')m.dy=(m.dy||0)+s; else if(e.key==='ArrowDown')m.dy=(m.dy||0)-s;
         else if(e.key==='ArrowLeft')m.Xc-=s; else if(e.key==='ArrowRight')m.Xc+=s;
         else if(e.key==='+'||e.key==='='){m.Wc*=1.015;m.Hc*=1.015;} else if(e.key==='-'||e.key==='_'){m.Wc/=1.015;m.Hc/=1.015;}
-        else if(e.key===']')m.edgeWhite=Math.min(1,(m.edgeWhite||0)+(e.shiftKey?0.1:0.03));
-        else if(e.key==='[')m.edgeWhite=Math.max(0,(m.edgeWhite||0)-(e.shiftKey?0.1:0.03));
+        else if(e.key===']')m.edgeWhite=Math.min(200,(m.edgeWhite||0)+(e.shiftKey?4:0.7));
+        else if(e.key==='[')m.edgeWhite=Math.max(0,(m.edgeWhite||0)-(e.shiftKey?4:0.7));
         else hit=false;
         if(hit)applyMember(o);
       } else if(target==='camera'){
