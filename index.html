@@ -491,7 +491,8 @@ async function main(){
   function frame(){
     const raw = FREEZE!=null?parseFloat(FREEZE):(started?clock.getElapsedTime():0);
     if(EDIT&&camEdit.on&&camEdit.playing){ camEdit.t+=1/60; if(camEdit.t>CFG.dur)camEdit.t=0; if((_fc=(_fc+1)%6)===0&&window.__editDraw)window.__editDraw(); }
-    const el=EDIT?(camEdit.on?camEdit.t:CFG.dur):(raw%CFG.dur), t2=el;
+    const _cp=(!EDIT&&meta.camPath&&meta.camPath.length>=2);
+    const el=EDIT?(camEdit.on?camEdit.t:CFG.dur):(_cp?(raw%CFG.dur):raw), t2=el;   // 既定は非ループ(引きは1回・顔巡りは自前ループ)
     // camera reveal (ヒーロー位置=アスペクトで自動フィット: 縦画面ほど引いて全員入れる)
     // グループを必ず余白付きで収めるフィットカメラ(どのアスペクトでも見切れ無し)
     const asp=VW/VH;
@@ -513,10 +514,20 @@ async function main(){
       camera.position.set(G.gcx+P.x+ptx*0.3, heroY0+P.y-pty*0.2, camZ);
       camera.rotation.set(P.rx||0, P.ry||0, 0);
     } else {
-      if(t2<=CFG.revEnd) camZ=start+(hz-start)*sstep(t2/CFG.revEnd); else camZ=hz-0.25*eout((t2-CFG.revEnd)/(CFG.dur-CFG.revEnd));
-      const rp=Math.min(1,t2/CFG.revEnd), wa=(1-rp)*(1-rp);
-      const wx=Math.sin(rp*Math.PI*2.0)*0.8*wa;   // 突き抜け中だけ横スイング
-      camera.position.set(G.gcx+wx+ptx*0.3, heroY0-pty*0.2, camZ);
+      const R1=5.5;                            // 引きリビール(1回だけ)
+      if(t2<R1){
+        camZ=start+(hz-start)*sstep(t2/R1);
+        camera.position.set(G.gcx+ptx*0.3, heroY0-pty*0.2, camZ);
+      } else {
+        // idle: 各メンバーの顔を順に真ん中へ(ゆっくり・ループ)。中央(ヒーロー)を挟んで巡る
+        const faces=meta.members.map(m=>({x:m.Xc, y:m.Yc+m.Hc*0.36+(m.dy||0), z:hz-1.15}));
+        faces.sort((a,b)=>a.x-b.x);            // 左→右へ
+        const W=[{x:G.gcx,y:heroY0,z:hz}].concat(faces);   // 中央→各顔→(中央へ戻ってループ)
+        const n=W.length, seg=4.0, u=((t2-R1)%(n*seg))/seg, i=Math.floor(u), f=sstep(u-i);
+        const a=W[i%n], b=W[(i+1)%n];
+        camZ=a.z+(b.z-a.z)*f;
+        camera.position.set(a.x+(b.x-a.x)*f+ptx*0.3, a.y+(b.y-a.y)*f-pty*0.2, camZ);
+      }
       camera.rotation.set(0,0,0);              // 真っ直ぐ(lookAt無し)
     }
     applyShift();
@@ -525,7 +536,7 @@ async function main(){
     { const Zl=L.z, dl=camZ+Zl, vH=vt*dl, vW=vt*Math.max(0.34,asp)*dl;
       const lw=Math.min(vW*0.82, vH*0.62/L.asp)*CF.logoScale, lsc=lw/L.wl; logo.scale.set(lsc,lsc,1);
       const lH=L.wl*L.asp*lsc;
-      logo.position.set(G.gcx+CF.logoX*vW, (G.gcy+CF.camY)+vH-lH/2-vH*0.05+CF.logoYoff*vH, -Zl);
+      logo.position.set(camera.position.x+CF.logoX*vW, camera.position.y+vH-lH/2-vH*0.05+CF.logoYoff*vH, -Zl);   // カメラ視点の上中央に追従
       // ロゴのハロー(ロゴ位置に追従・後ろに広がる)
       logoHalo.position.set(logo.position.x, logo.position.y, logo.position.z-0.01);
       logoHalo.scale.set(L.wl*lsc*1.6, L.wl*L.asp*lsc*2.0, 1); lhMat.opacity=FX.logoHalo*la; }
