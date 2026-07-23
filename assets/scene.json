@@ -134,32 +134,32 @@
    "aspect": 1.7778,
    "fit": 1.22,
    "camY": 0.31,
-   "logoScale": 1.1951,
-   "logoYoff": -0.024,
+   "logoScale": 1.08,
+   "logoYoff": -0.14,
    "logoX": 0
   },
   {
    "aspect": 1.6,
    "fit": 1.22,
    "camY": 0.31,
-   "logoScale": 1.1951,
-   "logoYoff": -0.024,
+   "logoScale": 1.08,
+   "logoYoff": -0.14,
    "logoX": 0
   },
   {
    "aspect": 2.3333,
    "fit": 1.22,
    "camY": 0.31,
-   "logoScale": 1.1951,
-   "logoYoff": -0.024,
+   "logoScale": 1.08,
+   "logoYoff": -0.14,
    "logoX": 0
   },
   {
    "aspect": 1.3333,
    "fit": 1.22,
    "camY": 0.31,
-   "logoScale": 1.1041,
-   "logoYoff": -0.104,
+   "logoScale": 1.05,
+   "logoYoff": -0.16,
    "logoX": 0
   }
  ],
